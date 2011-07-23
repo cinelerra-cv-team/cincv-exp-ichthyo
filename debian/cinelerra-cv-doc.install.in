@@ -1,0 +1,15 @@
+doc/cinelerra_cv_manual_en*.html		usr/share/doc/cinelerra-cv-doc
+doc/cinelerra_cv_manual_en.pdf		usr/share/doc/cinelerra-cv-doc
+doc/cinelerra_cv_manual_en.txt		usr/share/doc/cinelerra-cv-doc
+
+doc/cinelerra_cv_manual_fr*.html		usr/share/doc/cinelerra-cv-doc
+doc/cinelerra_cv_manual_fr.pdf		usr/share/doc/cinelerra-cv-doc
+doc/cinelerra_cv_manual_fr.txt		usr/share/doc/cinelerra-cv-doc
+
+doc/cinelerra_cv_manual_pt_BR*.html		usr/share/doc/cinelerra-cv-doc
+doc/cinelerra_cv_manual_pt_BR.pdf		usr/share/doc/cinelerra-cv-doc
+doc/cinelerra_cv_manual_pt_BR.txt		usr/share/doc/cinelerra-cv-doc
+
+doc/manual_images_en	usr/share/doc/cinelerra-cv-doc
+doc/manual_images_fr	usr/share/doc/cinelerra-cv-doc
+doc/manual_images_intl	usr/share/doc/cinelerra-cv-doc

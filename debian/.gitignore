@@ -1,0 +1,13 @@
+*.debhelper
+*.substvars
+cinelerra.1
+cinelerra
+files
+libguicast
+libmpeg3hv
+libmpeg3hv-dev
+libquicktimehv-dev
+libquicktimehv
+mplexhi.1
+mplexlo.1
+tmp

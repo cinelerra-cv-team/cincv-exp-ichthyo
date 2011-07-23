@@ -1,3 +1,228 @@
+cinelerra-cv (2.1.5-0.5) unstable; urgency=low
+
+  * Remove deprecated libesd support.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 10 Jul 2011 12:39:34 +0200
+
+cinelerra-cv (2.1.5-0.4) unstable; urgency=low
+
+  * Update doc-base file to start html documentation with the Table of
+    Contents instead of an empty file.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 06 Jun 2011 12:17:57 +0200
+
+cinelerra-cv (2.1.5-0.3) unstable; urgency=low
+
+  * Fix parallel build, and add missing html files and pt_BR documentation
+    in the -doc package (Thanks to Nemo Inis for the bug report).
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 06 Jun 2011 10:39:51 +0200
+
+cinelerra-cv (2.1.5-0.2) unstable; urgency=low
+
+  * Rebuild against libmjpegtools-2.0-0 and libx264-115.
+  * New patch 03_v4l to fix build with v4l1.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 30 May 2011 09:53:41 +0200
+
+cinelerra-cv (2.1.5-0.1) unstable; urgency=low
+
+  * Rebuild against libx264-112.
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 09 Mar 2011 14:26:32 +0100
+
+cinelerra-cv (2.1.5-0.0) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 19 Jan 2011 09:49:51 +0100
+
+cinelerra-cv (2.1.0~svn20091213-0.8) unstable; urgency=low
+
+  * Rebuild against libx264-104.
+
+ -- Christian Marillat <marillat@debian.org>  Tue, 03 Aug 2010 07:41:59 +0200
+
+cinelerra-cv (2.1.0~svn20091213-0.7) unstable; urgency=low
+
+  * Rebuild against libx264-98.
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 09 Jun 2010 11:58:49 +0200
+
+cinelerra-cv (2.1.0~svn20091213-0.6) unstable; urgency=low
+
+  * Rebuild against libx264-93.
+
+ -- Christian Marillat <marillat@debian.org>  Tue, 20 Apr 2010 22:27:40 +0200
+
+cinelerra-cv (2.1.0~svn20091213-0.5) unstable; urgency=low
+
+  * Rebuild with libjpeg62.
+
+ -- Christian Marillat <marillat@debian.org>  Tue, 16 Feb 2010 11:17:13 +0100
+
+cinelerra-cv (2.1.0~svn20091213-0.4) unstable; urgency=low
+
+  * debian/rules Add a missing \ in configure call.
+
+ -- Christian Marillat <marillat@debian.org>  Sat, 13 Feb 2010 00:21:27 +0100
+
+cinelerra-cv (2.1.0~svn20091213-0.3) unstable; urgency=low
+
+  * Rebuild against latest libx264-83
+
+ -- Christian Marillat <marillat@debian.org>  Fri, 12 Feb 2010 17:00:20 +0100
+
+cinelerra-cv (2.1.0~svn20091213-0.2) unstable; urgency=low
+
+  * Add a conflicts for the -doc package.
+
+ -- Christian Marillat <marillat@debian.org>  Thu, 17 Dec 2009 15:01:42 +0100
+
+cinelerra-cv (2.1.0~svn20091213-0.1) unstable; urgency=low
+
+  * cinelerra-cv-data should conflicts with cinelerra-data (Thanks to
+    Florian Cramer).
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 13 Dec 2009 20:35:32 +0100
+
+cinelerra-cv (2.1.0~svn20091213-0.0) unstable; urgency=low
+
+  * New svn release (git now).
+  * Removed uneeded 03_x264.diff patch.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 13 Dec 2009 11:35:18 +0100
+
+cinelerra (2.1.0~svn20090223-0.9) unstable; urgency=low
+
+  * Build-depends on the latest libx264-dev package to be sure to link
+    against libx264-78.
+  * Build the pt_BR documentation.
+
+ -- Christian Marillat <marillat@debian.org>  Thu, 29 Oct 2009 22:19:03 +0100
+
+cinelerra (2.1.0~svn20090223-0.8) unstable; urgency=low
+
+  * Rebuild against libx264-78.
+
+ -- Christian Marillat <marillat@debian.org>  Thu, 29 Oct 2009 21:39:22 +0100
+
+cinelerra (2.1.0~svn20090223-0.7) unstable; urgency=low
+
+  * Make a more clean 03_x264-75 patch.
+  * Rebuild against libx264-76.
+
+ -- Christian Marillat <marillat@debian.org>  Thu, 08 Oct 2009 10:13:14 +0200
+
+cinelerra (2.1.0~svn20090223-0.6) unstable; urgency=low
+
+  * New patch 03_x264-75 to detect correctly libx264-75 in configure.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 21 Sep 2009 19:46:12 +0200
+
+cinelerra (2.1.0~svn20090223-0.5) unstable; urgency=low
+
+  * Rebuild against latest libfaad-dev package.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 20 Sep 2009 09:19:02 +0200
+
+cinelerra (2.1.0~svn20090223-0.4) unstable; urgency=low
+
+  * Don't package .la files.
+
+ -- Christian Marillat <marillat@debian.org>  Fri, 28 Aug 2009 14:51:36 +0200
+
+cinelerra (2.1.0~svn20090223-0.3) unstable; urgency=low
+
+  * Rebuild against latest x264.
+  * Remove mpeg{toc,dump,cat} binaries already in mpeg3-utils package and
+    add that package in Recommends.
+
+ -- Christian Marillat <marillat@debian.org>  Fri, 28 Aug 2009 12:09:21 +0200
+
+cinelerra (2.1.0~svn20090223-0.2) unstable; urgency=low
+
+  * debian/control Replaces libgl1-mesa-dev | libgl-dev by libglu1-mesa-dev
+    | libglu-dev in Build-Depends.
+
+ -- Christian Marillat <marillat@debian.org>  Tue, 31 Mar 2009 17:51:37 +0200
+
+cinelerra (2.1.0~svn20090223-0.1) unstable; urgency=low
+
+  * New patch to fix build with libavformat50.
+
+ -- Christian Marillat <marillat@debian.org>  Tue, 31 Mar 2009 17:01:19 +0200
+
+cinelerra (2.1.0~svn20090223-0.0) unstable; urgency=low
+
+  * New tarball to remove automake/libtool symlinks.
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 25 Feb 2009 11:00:39 +0100
+
+cinelerra (2.1.0~svn20090222-0.0) unstable; urgency=low
+
+  * New git release.
+  * Generate .gmo file in po directory with 'make update-gmo'.
+  * Remove duplicate Vera fonts and add ttf-bitstream-vera dependency for
+    cinelerra.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 22 Feb 2009 19:16:15 +0100
+
+cinelerra (2.1.0~svn20080706-0.0) unstable; urgency=low
+
+  * New svn release (1060).
+  * Build against the new libmp3lame package.
+  * Removed g++ 4.3 patch included upstream.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 06 Jul 2008 18:54:56 +0200
+
+cinelerra (2.1.0~svn20080425-0.1) unstable; urgency=low
+
+  * Rebuild against latest ffmpeg libraries.
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 21 May 2008 14:49:44 +0200
+
+cinelerra (2.1.0~svn20080425-0.0) unstable; urgency=low
+
+  * New svn release (1056) with ffmpeg swscale patch.
+  * Added texlive-latex-base in Build-Depends-Indep
+  * Build with --with-external-ffmpeg option and add libavcodeccvs-dev,
+    libswscalecvs-dev and libpostproccvs-dev in Build-Depends.
+
+ -- Christian Marillat <marillat@debian.org>  Fri, 25 Apr 2008 11:58:47 +0200
+
+cinelerra (2.1.0~svn20080331-0.1) unstable; urgency=low
+
+  * Move to quilt instead of dpatch.
+  * Added a patch to fix build with g++ 4.3
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 02 Apr 2008 21:11:13 +0200
+
+cinelerra (2.1.0~svn20080331-0.0) unstable; urgency=low
+
+  * New svn release (1055).
+  * Remove --with-external-ffmpeg (Doesn't build)
+  * Build agains't latest libopenexr-dev package.
+  * -dev packages should be in libdevel dection.
+  * Added libglu1-mesa-dev in Build-depends.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 31 Mar 2008 23:34:12 +0200
+
+cinelerra (2.1.0~svn20071125-0.0) unstable; urgency=low
+
+  * New svn release.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 25 Nov 2007 10:34:21 +0000
+
+cinelerra (2.1.0~svn20070827-0.1) unstable; urgency=low
+
+  * Build documentation in debian/rules in binary-indep target, instead of
+    before the tarball creation. Added necessary depdencies in
+    Build-Depends-Indep.
+  * Add a Conflicts for libguicast.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 25 Nov 2007 10:11:28 +0000
+
 hvirtual (1:2.1.0-1svn20060912) unstable; urgency=low
 
   * SVN of 2006-09-12, non-debug build, merge with Adam's 2.1 version

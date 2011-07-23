@@ -1,0 +1,63 @@
+.TH "CINELERRA" "1" 
+.SH "NAME" 
+mplexhi \(em A MPEG1 multiplexer 
+.SH "SYNOPSIS" 
+.PP 
+\fBmplexhi\fR [\fB-q\fP]  [\fB-n\fP]  [\fB-m\fP]  [\fB-b bufsize\fP]  [\fB-r outputrate\fP]  [\fB-l frames\fP]  [\fB-v offset\fP]  [\fB-a offset\fP]  [\fB-s ssize\fP]  [\fB-V\fP]  [\fB-p packets\fP]  [\fB-h\fP]  [\fB-f fmt\fP]  [\fB-S maxsize \fP]  [\fB-M\fP]  [\fB-e\fP]  [stream1]  [stream2]  [output]  
+.SH "DESCRIPTION" 
+.PP 
+This manual page documents briefly the 
+\fBmplexhi\fR command. 
+.PP 
+\fBmplexhi\fR is a MPEG1 multiplexer 
+ 
+.SH "OPTIONS" 
+.IP "\fB-q\fP" 10 
+Quiet mode for unattended batch usage 
+.IP "\fB-n\fP" 10 
+Noisy (verbose) mode for debugging streams 
+.IP "\fB-m\fP" 10 
+Mpeg version (default: 1) [1..2] 
+.IP "\fB-V\fP" 10 
+Multiplex variable bit-rate (experimental) 
+.IP "\fB-h\fP" 10 
+System header in every pack rather than just in first 
+.IP "\fB-M\fP" 10 
+Generate a *single* multi-file program rather a program  
+per file %%d in the output file name is replaced by a segment counter 
+.IP "\fB-e\fP" 10 
+Vcdmplex style start-up (debugging tool) 
+.IP "\fB-b num\fP" 10 
+Specify decoder buffers size in kB. (default: 46) [ 20...1000] 
+.IP "\fB-r num\fP" 10 
+ 
+Specify data rate of output stream in kbit/sec (default 0=Compute from source streams) 
+ 
+.IP "\fB-l num\fP" 10 
+Multiplex only num frames (default 0=multiplex all) 
+.IP "\fB-v num\fP" 10 
+Specify a video timestamp offset in mSec 
+.IP "\fB-a num\fP" 10 
+Specify an audio timestamp offset in mSec  
+.IP "\fB-s num\fP" 10 
+Specify sector size in bytes (default: 2324) [256..16384] 
+.IP "\fB-p num\fP" 10 
+Number of packets per pack (default: 20) [1..100] 
+.IP "\fB-f fmt\fP" 10 
+ 
+Set pre-defined mux format.  
+[0 = Auto MPEG1, 1 = VCD, 2 = Auto MPEG2, 3 = SVCD, 4 = DVD]  
+(N.b only 0 .. 3 currently implemented!*) 
+ 
+.IP "\fB-S size\fP" 10 
+Maximum size of output file in M bytes (default: 680) 
+.SH "AUTHOR" 
+.PP 
+This manual page was written by Sylvain Joyeux <sylvain.joyeux@m4x.org> for 
+the \fBDebian GNU/Linux\fP system (but may be used by others).  Permission is 
+granted to copy, distribute and/or modify this document under 
+the terms of the GNU Free Documentation 
+License, Version 1.1 or any later version published by the Free 
+Software Foundation; with no Invariant Sections, no Front-Cover 
+Texts and no Back-Cover Texts. 
+.\" created by instant / docbook-to-man, Mon 27 Aug 2007, 16:57 

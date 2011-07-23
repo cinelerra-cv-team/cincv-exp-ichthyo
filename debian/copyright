@@ -1,10 +1,9 @@
 This package was debianized by Sylvain Joyeux <sylvain.joyeux@m4x.org>
 Mon, 21 Oct 2002 03:15:48 +0200.
 
-It was downloaded from http://heroinewarrior.com
+It was downloaded from http://cvs.cinelerra.org/getting_cinelerra.php#source
 
-Copyright: GNU Public License 2
+Copyright 2008 : GNU Public License 2
 
 On Debian GNU/Linux systems, the complete text of the GNU General Public
-License may be found in `/usr/share/common-licenses/GPL'.
-
+License may be found in `/usr/share/common-licenses/GPL-2'.

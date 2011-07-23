@@ -1,1 +1,7 @@
+Makefile
+Makefile.in
 chromakey_sl.c
+# added by Ichthyostega:
+.deps
+.libs
+

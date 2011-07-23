@@ -1,0 +1,26 @@
+Index: cinelerra-cv-2.1.5/cinelerra/vdevicebuz.C
+===================================================================
+--- cinelerra-cv-2.1.5.orig/cinelerra/vdevicebuz.C	2011-05-30 09:47:51.206861039 +0200
++++ cinelerra-cv-2.1.5/cinelerra/vdevicebuz.C	2011-05-30 09:47:57.130643616 +0200
+@@ -45,7 +45,7 @@
+ #include <stdint.h>
+ #include <linux/kernel.h>
+ //#include <linux/videodev2.h>
+-#include <linux/videodev.h>
++#include "debian/videodev.h"
+ #include <fcntl.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+Index: cinelerra-cv-2.1.5/cinelerra/vdevicev4l.h
+===================================================================
+--- cinelerra-cv-2.1.5.orig/cinelerra/vdevicev4l.h	2011-05-30 09:48:12.602078936 +0200
++++ cinelerra-cv-2.1.5/cinelerra/vdevicev4l.h	2011-05-30 09:48:27.445541381 +0200
+@@ -23,7 +23,7 @@
+ #define VDEVICEV4L_H
+ 
+ #include "vdevicebase.h"
+-#include <linux/videodev.h>
++#include "debian/videodev.h"
+ #include "videodevice.inc"
+ 
+ class VDeviceV4L : public VDeviceBase

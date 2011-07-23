@@ -1,0 +1,15 @@
+Document: cinelerra-cv
+Title: Cinelerra CV Manual
+Author: Copyright 2003, 2004, 2005, 2006 Adam Crossfire - Heroine Virtual Lt.
+Abstract: This manual edition is 1.55, for Cinelerra CV version 2.1
+Section: Graphics
+
+Format: text
+Files: /usr/share/doc/cinelerra-cv-doc/cinelerra_cv_manual_en.txt.gz
+
+Format: HTML
+Index: /usr/share/doc/cinelerra-cv-doc/cinelerra_cv_manual_en_toc.html
+Files: /usr/share/doc/cinelerra-cv-doc/*.html
+
+Format: PDF
+Files: /usr/share/doc/cinelerra-cv-doc/cinelerra_cv_manual_en.pdf.gz

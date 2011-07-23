@@ -1,2 +1,2 @@
-usr/lib/libquicktimehv.*
-usr/include/quicktimehv/*
+usr/lib/libquicktimehv*.so
+usr/include/quicktime/*

@@ -1,2 +1,2 @@
-usr/lib/libmpeg3hv.*
-usr/include/mpeg3hv/*
+usr/lib/libmpeg3hv*.so
+usr/include/mpeg3/*

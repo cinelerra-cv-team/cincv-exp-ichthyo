@@ -14,3 +14,7 @@ libswscale.pc
 *.d
 *.so
 *.so.*
+Makefile
+Makefile.in
+avconfig.h
+

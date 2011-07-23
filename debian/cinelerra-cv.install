@@ -1,0 +1,7 @@
+usr/bin/cinelerra
+usr/bin/mplexlo
+usr/lib/cinelerra/shapewipe
+usr/lib/cinelerra/*.so
+usr/lib/libguicast.so*
+usr/share/applications
+usr/share/pixmaps

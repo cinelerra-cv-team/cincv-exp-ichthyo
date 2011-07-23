@@ -1,88 +1,205 @@
 #!/usr/bin/make -f
-# Made with the aid of debmake, by Christoph Lameter,
-# based on the sample debian/rules file for GNU hello by Ian Jackson.
+## 
+## Cinelerra Debian build
+##
+# custom build by Ichthyostega (2006 - 2011)
+# based on the Akirad and Debian-Multimedia packages
+#
 
-package=hvirtual
-export DH_COMPAT=4
 
-CONFFLAGS=
-#since we are building from .svn
-+export DH_ALWAYS_EXCLUDE=.svn
 
-ifneq ($(DEB_HOST_ARCH),powerpc)
-	CFLAGS=-ffast-math -O3 -mmmx -march=pentium4 -msse -msse2 -minline-all-stringops -fprefetch-loop-arrays -funroll-loops
-	# CFLAGS=-ffast-math -g -mmmx -march=pentium-mmx
-	CXXFLAGS=$(CFLAGS) -fno-check-new
+# debug or release build?
+# uncomment as needed!
+#
+#DEB_BUILD_OPTIONS+= --debug
+#DEB_BUILD_OPTIONS+= --nostrip 
+#DEB_BUILD_OPTIONS+= --optimize
+#DEB_BUILD_OPTIONS+= --opengl
+
+#don't include SCM subdirs (Git or Subverison)
+export DH_ALWAYS_EXCLUDE=.svn:.git
+#
+# note: please build source packages with
+#       dpkg-buildpackage -rfakeroot -I.svn -I.git
+
+#CONFFLAGS=--with-buildinfo=svn/recompile
+CONFFLAGS=--with-buildinfo=git/recompile
+
+
+# Configure Platform
+#
+ARCH:= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+
+ifeq ($(ARCH),i386)
+	STDFLAGS=-march=i586 -mmmx -ffast-math
+	OPTIFLAGS=-march=pentium4 -mmmx -msse -msse2 -ffast-math -minline-all-stringops -fprefetch-loop-arrays -funroll-loops
 	CONFFLAGS+=--enable-mmx --enable-x86 --without-pic
 endif
-
-ifneq (, $(findstring smp2,$(DEB_BUILD_OPTIONS)))
-	MAKEFLAGS=-j2
+ifeq ($(ARCH),powerpc)
+	STDFLAGS=
+	OPTIFLAGS=-mcpu=common -ffast-math -minline-all-stringops -fprefetch-loop-arrays -funroll-loops
+	CONFFLAGS+=--without-pic
+endif
+ifeq ($(ARCH),amd64)
+	STDFLAGS=-march=athlon64 -ffast-math
+	OPTIFLAGS=-march=athlon64 -msse3 -ffast-math -funroll-loops -minline-all-stringops -fprefetch-loop-arrays -fPIC
+	CONFFLAGS+=--enable-sse3 --with-pic
 endif
 
-config.status: configure 
-	$(checkdir)
-	@if [ -z "$(CFLAGS)" ] ; then CFLAGS="$(CFLAGS)" ; fi ;
-	@if [ -z "$(CXXFLAGS)" ] ; then CXXFLAGS="$(CXXFLAGS)" ; fi ;
-	CFLAGS="$(CFLAGS)" CXXFLAGS="$(CXXFLAGS)" \
-					./configure --prefix=/usr $(CONFFLAGS)
-	
+
+# Compiler: handle warnings, debugging and optimiztion
+#
+CFLAGS = -Wall -Wno-write-strings -Wno-unused
+
+ifneq (,$(findstring optimize,$(DEB_BUILD_OPTIONS)))
+	CFLAGS=$(OPTIFLAGS)
+	ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
+		CFLAGS += -O1
+	else
+		CFLAGS += -O3
+	endif
+else
+	CFLAGS=$(STDFLAGS) -O1
+endif
+CXXFLAGS=$(CFLAGS) -fno-check-new
+
+ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
+#	CFLAGS += -g
+	CFLAGS += -ggdb3
+endif
+ifneq (,$(findstring opengl,$(DEB_BUILD_OPTIONS)))
+	CONFFLAGS += --enable-opengl
+else
+	CONFFLAGS += --disable-opengl
+endif
+ifneq (,$(findstring nostrip,$(DEB_BUILD_OPTIONS)))
+	INSTALL_PROGRAM += -s
+	# "binary not stripped!"
+endif
+
+
+# concurrent make
+#
+NCPUS := $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+ifeq ($(NCPUS),-1)
+	NCPUS:=1
+endif
+ifeq ($(NCPUS),0)
+	NCPUS:=1
+endif
+
+
+# allow explicit override
+@if [ -z "$(CFLAGS)" ]   ; then CFLAGS="$(CFLAGS)"     ; fi ;
+@if [ -z "$(CXXFLAGS)" ] ; then CXXFLAGS="$(CXXFLAGS)" ; fi ;
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+BUILDDATE=$(shell LANG=C date)
+
+CONFFLAGS += --prefix=/usr \
+             --libdir=\$${prefix}/lib/$(DEB_HOST_MULTIARCH) \
+             LDFLAGS="-Wl,--as-needed" \
+             CFLAGS="$(CFLAGS)" CXXFLAGS="$(CXXFLAGS)"
+
+
+prepare-sources:
+	dh_testdir
+	autoreconf -i --force
+
+configure: configure-stamp
+configure-stamp: prepare-sources
+	./configure $(CONFFLAGS)
+
+	touch $@
+
+
 build: build-stamp
-build-stamp: config.status
-	$(checkdir)
-	$(MAKE) $(MAKEFLAGS)
-	docbook-to-man debian/cinelerra.sgml > debian/cinelerra.1
-	docbook-to-man debian/mplexhi.sgml > debian/mplexhi.1
-	docbook-to-man debian/mplexlo.sgml > debian/mplexlo.1
-	touch build-stamp
+build-stamp: configure-stamp
+	dh_testdir
 
-clean: 
-	$(checkdir)
-	-$(MAKE) -i distclean
-	dh_clean -a
-	-rm -f debian/cinelerra.1
-	-rm -f debian/mplexhi.1
-	-rm -f debian/mplexlo.1
-	-rm -f build-stamp
+	$(MAKE) -j $(NCPUS)
+	$(MAKE) -C po update-gmo
 
-binary-indep: checkroot build-stamp
-binary-arch: checkroot build-stamp
+	touch $@
+
+clean:
+	dh_testdir
+	dh_testroot
+	rm -f configure-stamp build-stamp
+
+	[ ! -f Makefile ] || $(MAKE) distclean
+
+	dh_clean doc/cinelerra_cv_manual_en.pdf doc/cinelerra_cv_manual_en.html doc/cinelerra_cv_manual_en.txt \
+	doc/cinelerra_cv_manual_fr.pdf doc/cinelerra_cv_manual_fr.html doc/cinelerra_cv_manual_fr.txt \
+	quicktime/ffmpeg/config.log quicktime/ffmpeg/config.mak cinelerra/versioninfo.h \
+	po/*.gmo debian/cinelerra-cv-doc.install
+
+	cp doc/*.texi /tmp
+	rm doc/cinelerra_cv_manual_fr*
+	rm doc/cinelerra_cv_manual_en*
+	rm doc/cinelerra_cv_manual_pt_BR*
+	mv /tmp/*.texi doc
+
+	[ ! -f debian/cinelerra-cv-doc.install ] || mv debian/cinelerra-cv-doc.install debian/cinelerra-cv-doc.install.in
+
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs
+
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/tmp
-	chmod -x debian/tmp/usr/lib/cinelerra/*
-	chmod +x debian/tmp/usr/lib/cinelerra/fonts
-	chmod -x debian/tmp/usr/lib/cinelerra/fonts/*
-	dh_install --sourcedir=debian/tmp --autodest
-	dh_installdocs -XCVS
-	dh_installchangelogs -a
-	dh_installman
-	dh_installmenu
 
-	dh_fixperms -a
-	dh_compress -a
-	# Since Cinelerra is far from stable, I prefer leaving the debug info
+	find debian/tmp/usr/lib -name *.la | xargs -r rm
+
+	rm debian/tmp/usr/lib/cinelerra/fonts/Vera*.ttf
+
+# Already in mpeg3-utils package.
+	rm debian/tmp/usr/bin/mpeg*
+
+	dh_install --fail-missing -X.xcf -Xcinelerra.a -Xvhook
+
+
+# Build architecture-independent files here.
+binary-indep: build install
+	dh_testdir -i
+	dh_testroot -i
+	dh_installdocs -i
+	dh_installchangelogs -i ChangeLog
+	cd doc && ./make_manuals.sh en
+	cd doc && ./make_manuals.sh fr
+	cd doc && ./make_manuals.sh pt_BR
+	cp debian/cinelerra-cv-doc.install.in debian/cinelerra-cv-doc.install
+
+	dh_install --fail-missing -X.xcf -Xcinelerra.a -Xvhook
+	dh_link -i
+	dh_compress -i
+	dh_fixperms -i
+	dh_installdeb -i
+	dh_gencontrol -i
+	dh_md5sums -i
+	dh_builddeb -i -- -Zbzip2
+
+# Build architecture-dependent files here.
+binary-arch: build install
+	dh_testdir -a
+	dh_testroot -a
+	dh_installdocs -a
+	dh_installman -a
+	dh_installchangelogs -a ChangeLog
+	dh_link -a
 	dh_strip -a
-	strip -x -s -R .comment -R .note debian/cinelerra/usr/lib/cinelerra/*.so
-
-# AFAIK bootstraping should be gone now -- minmax
-
-# Rename defaulttheme to blondtheme
-#	guicast/bootstrap debian/cinelerra/usr/lib/cinelerra/blondtheme.so plugins/defaulttheme/data/*.png
-# Add bluedottheme
-#	guicast/bootstrap debian/cinelerra/usr/lib/cinelerra/bluedottheme.so plugins/bluedottheme/data/*.png
-#	guicast/bootstrap debian/cinelerra/usr/bin/cinelerra cinelerra/data/mode_*.png
-# not present anymore?
-#	guicast/bootstrap debian/cinelerra/usr/lib/cinelerra/microtheme.so plugins/microtheme/data/*.png
-
-	dh_makeshlibs -V -a
+	dh_compress -a
+	dh_fixperms -a
+	dh_makeshlibs -a -V
+	dh_installdeb -a
 	dh_shlibdeps -a
-
-	dh_gencontrol 
-	dh_builddeb 
-	
+	dh_gencontrol -a
+	dh_md5sums -a
+	dh_builddeb -a -- -Zbzip2
 
 binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install configure
 
-checkroot: 
-	dh_testroot
 
 

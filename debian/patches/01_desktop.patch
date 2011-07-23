@@ -1,0 +1,19 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 01_desktop.dpatch by Christian Marillat <marillat@debian.org>
+##
+## All lines beginning with ## DP:' are a description of the patch.
+## DP:
+
+@DPATCH@
+
+--- cinelerra-2.1.0~svn20070827.orig/image/cinelerra.desktop	2007-08-27 17:02:59.000000000 +0200
++++ cinelerra-2.1.0~svn20070827/image/cinelerra.desktop	2007-08-27 17:03:22.000000000 +0200
+@@ -5,7 +5,7 @@
+ Name[fr]=Cinelerra
+ Name[es]=Cinelerra
+ Comment=Video Editor
+-Categories=Application;AudioVideo;Multimedia;
++Categories=AudioVideo;
+ Encoding=UTF-8
+ Exec=cinelerra
+ Icon=cinelerra.xpm
