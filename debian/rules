@@ -13,7 +13,7 @@
 #
 #DEB_BUILD_OPTIONS+= --debug
 #DEB_BUILD_OPTIONS+= --nostrip 
-#DEB_BUILD_OPTIONS+= --optimize
+DEB_BUILD_OPTIONS+= --optimize
 #DEB_BUILD_OPTIONS+= --opengl
 
 #don't include SCM subdirs (Git or Subverison)
