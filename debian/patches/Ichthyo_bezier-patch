@@ -1,0 +1,3250 @@
+ __________________________________________________________
+ Patch to improve the GUI for bezier curves and Float Autos
+ by Ichthyostega, 2006
+
+ _________________________________________
+ (c) Hermann Voßeler <Ichthyostega@web.de>
+ This code is Free Software and may be used and redistibuted
+ under the terms and conditions of the 
+    GNU GENERAL PUBLIC LICENSE, Version 2
+
+ For details and documentation see: http://ichthyostega.de/cinelerra/bezier-patch/
+ 
+ This Patch is drawn againtst Cinelerra-CV2.1.5, (Git 01dc43)
+ 
+ In addition to applying the patch, you need to place 
+ the following new images into the theme data folders:
+ 
+   plugins/defaulttheme/data/tan_linear.png
+   plugins/defaulttheme/data/tan_smooth.png
+   plugins/suv/data/tan_linear.png
+   plugins/suv/data/tan_smooth.png
+ 
+ (these are included in Ichthyo's custom debian package)
+
+
+===================================================================================
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/apatchgui.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/apatchgui.C
+@@ -117,7 +117,6 @@ int APatchGUI::update(int x, int y)
+ 			FloatAutos *ptr = (FloatAutos*)atrack->automation->autos[AUTOMATION_FADE];
+ 			float value = ptr->get_value(
+ 				(long)unit_position,
+-				PLAY_FORWARD, 
+ 				previous, 
+ 				next);
+ 			fade->update(fade->get_w(),
+@@ -229,7 +228,7 @@ AFadePatch::AFadePatch(MWindow *mwindow,
+ 			w, 
+ 			mwindow->edl->local_session->automation_mins[AUTOGROUPTYPE_AUDIO_FADE], 
+ 			mwindow->edl->local_session->automation_maxs[AUTOGROUPTYPE_AUDIO_FADE], 
+-			get_keyframe(mwindow, patch)->value)
++			get_keyframe(mwindow, patch)->get_value())
+ {
+ 	this->mwindow = mwindow;
+ 	this->patch = patch;
+@@ -244,8 +243,8 @@ float AFadePatch::update_edl()
+ 
+ 	current = (FloatAuto*)fade_autos->get_auto_for_editing(position);
+ 
+-	float result = get_value() - current->value;
+-	current->value = get_value();
++	float result = get_value() - current->get_value();
++	current->set_value(this->get_value());
+ 
+ 	mwindow->undo->update_undo(_("fade"), 
+ 		LOAD_AUTOMATION, 
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/auto.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/auto.C
+@@ -69,9 +69,17 @@ void Auto::copy_from(Auto *that)
+ 	this->position = that->position;
+ }
+ 
+-int Auto::interpolate_from(Auto *a1, Auto *a2, int64_t position)
++int Auto::interpolate_from(Auto *a1, Auto *a2, int64_t new_position, Auto *templ)
+ {
+-	copy_from(a1);
++	if(!templ) 
++		templ = a1;
++	if(!templ) 
++		templ = previous;
++	if(!templ && this->autos)
++		templ = this->autos->default_auto;
++	if(templ)
++		copy_from(templ);
++	position = new_position;
+ 	return 0;
+ }
+ 
+@@ -81,19 +89,3 @@ void Auto::load(FileXML *xml)
+ }
+ 
+ 
+-
+-float Auto::value_to_percentage()
+-{
+-	return 0;
+-}
+-
+-float Auto::invalue_to_percentage()
+-{
+-	return 0;
+-}
+-
+-float Auto::outvalue_to_percentage()
+-{
+-	return 0;
+-}
+-
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/auto.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/auto.h
+@@ -45,19 +45,15 @@ public:
+ 	virtual Auto& operator=(Auto &that);
+ 	virtual int operator==(Auto &that);
+ 	virtual void copy_from(Auto *that);
+-	/* for interpolation creation */
+-	/* if not possible, copy from a1 and return 0*/ 	
+-	virtual int interpolate_from(Auto *a1, Auto *a2, int64_t position); 
++	/* create an interpolation using a1 and a2, (defaulting to previous and next)  */
++	/* if not possible, just fill from a1 (or from template if given) and return 0  */ 	
++	virtual int interpolate_from(Auto *a1, Auto *a2, int64_t new_position, Auto *templ=0);
+ 	virtual void copy(int64_t start, int64_t end, FileXML *file, int default_only);
+ 
+ 	virtual void load(FileXML *file);
+ 
+ 	virtual void get_caption(char *string) {};
+ 
+- 	virtual float value_to_percentage();
+- 	virtual float invalue_to_percentage();
+- 	virtual float outvalue_to_percentage();
+-
+ 
+ 	int skip;       // if added by selection event for moves
+ 	EDL *edl;
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/autos.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/autos.C
+@@ -183,8 +183,8 @@ void Autos::insert_track(Autos *automati
+ 	if(replace_default) default_auto->copy_from(automation->default_auto);
+ 	for(Auto *current = automation->first; current; current = NEXT)
+ 	{
+-		Auto *new_auto = insert_auto(start_unit + current->position);
+-		new_auto->copy_from(current);
++// fill new auto with values from current (template), interpolate values if possible		
++		Auto *new_auto = insert_auto(start_unit + current->position, current);
+ // Override copy_from
+ 		new_auto->position = current->position + start_unit;
+ 	}
+@@ -300,7 +300,7 @@ Auto* Autos::get_auto_for_editing(double
+ 
+ 	if(edl->session->auto_keyframes)
+ 	{
+-		result = insert_auto_for_editing(track->to_units(position, 0));
++		result = insert_auto(track->to_units(position, 0));
+ 	}
+ 	else
+ 		result = get_prev_auto(track->to_units(position, 0), 
+@@ -355,7 +355,7 @@ Auto* Autos::get_next_auto(int64_t posit
+ 	return current;
+ }
+ 
+-Auto* Autos::insert_auto(int64_t position)
++Auto* Autos::insert_auto(int64_t position, Auto *templ)
+ {
+ 	Auto *current, *result;
+ 
+@@ -381,7 +381,6 @@ Auto* Autos::insert_auto(int64_t positio
+ 		if(current)
+ 		{
+ 			insert_after(current, result = new_auto());
+-			result->copy_from(current);
+ 		}
+ 		else
+ 		{
+@@ -389,59 +388,10 @@ Auto* Autos::insert_auto(int64_t positio
+ 			if(!current) current = default_auto;
+ 
+ 			insert_before(first, result = new_auto());
+-			if(current) result->copy_from(current);
+ 		}
+ 
+-		result->position = position;
+-	}
+-	else
+-	{
+-		result = current;
+-	}
+-
+-	return result;
+-}
+-
+-Auto* Autos::insert_auto_for_editing(int64_t position)
+-{
+-	Auto *current, *result;
+-
+-// Test for existence
+-	for(current = first; 
+-		current && !edl->equivalent(current->position, position); 
+-		current = NEXT)
+-	{
+-		;
+-	}
+-
+-//printf("Autos::insert_auto_for_editing %p\n", current);
+-// Insert new
+-	if(!current)
+-	{
+-// Get first one on or before as a template
+-		for(current = last; 
+-			current && current->position > position; 
+-			current = PREVIOUS)
+-		{
+-			;
+-		}
+-
+-		if(current)
+-		{
+-			Auto *next = NEXT;
+-			insert_after(current, result = new_auto());
+-			result->interpolate_from(current, next, position);
+-		}
+-		else
+-		{
+-			current = first;
+-			if(!current) current = default_auto;
+-
+-			insert_before(first, result = new_auto());
+-			if(current) result->copy_from(current);
+-		}
+-
+-		result->position = position;
++// interpolate if possible, else copy from template
++		result->interpolate_from(0, 0, position, templ);
+ 	}
+ 	else
+ 	{
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/autos.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/autos.h
+@@ -64,10 +64,8 @@ public:
+ 	Auto* get_auto_for_editing(double position = -1);
+ 
+ // Insert keyframe at the point if it doesn't exist
+-	Auto* insert_auto(int64_t position);
+-// Insert keyframe at the point if it doesn't exist
+-// Interpolate it insead of copying
+-	Auto* insert_auto_for_editing(int64_t position);
++// Interpolate its value if possible
++	Auto* insert_auto(int64_t position, Auto *templ=0);
+ 	void insert_track(Autos *automation, 
+ 		int64_t start_unit, 
+ 		int64_t length_units,
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/cwindowgui.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/cwindowgui.C
+@@ -1837,9 +1837,9 @@ void CWindowCanvas::reset_keyframe(int d
+ 			1,
+ 			1);
+ 
+-		x_keyframe->value = 0;
+-		y_keyframe->value = 0;
+-		z_keyframe->value = 1;
++		x_keyframe->set_value(0);
++		y_keyframe->set_value(0);
++		z_keyframe->set_value(1);
+ 
+ 		mwindow->sync_parameters(CHANGE_PARAMS);
+ 		gui->update_tool();
+@@ -2264,9 +2264,6 @@ int CWindowCanvas::test_bezier(int butto
+ 				FloatAutos *affected_y_autos;
+ 				FloatAutos *affected_z_autos;
+ 				if(!gui->affected_track) return 0;
+-				double position = mwindow->edl->local_session->get_selectionstart(1);
+-				int64_t track_position = gui->affected_track->to_units(position, 0);
+-
+ 				if(mwindow->edl->session->cwindow_operation == CWINDOW_CAMERA)
+ 				{
+ 					affected_x_autos = (FloatAutos*)gui->affected_track->automation->autos[AUTOMATION_CAMERA_X];
+@@ -2283,78 +2280,33 @@ int CWindowCanvas::test_bezier(int butto
+ 
+ 				if(gui->translating_zoom)
+ 				{
+-					FloatAuto *previous = 0;
+-					FloatAuto *next = 0;
+-					float new_z = affected_z_autos->get_value(
+-						track_position, 
+-						PLAY_FORWARD,
+-						previous,
+-						next);
+ 					gui->affected_z = 
+ 						(FloatAuto*)gui->cwindow->calculate_affected_auto(
+ 							affected_z_autos, 1, &created, 0);
+-					if(created) 
+-					{
+-						gui->affected_z->value = new_z;
+-						gui->affected_z->control_in_value = 0;
+-						gui->affected_z->control_out_value = 0;
+-						gui->affected_z->control_in_position = 0;
+-						gui->affected_z->control_out_position = 0;
+-						redraw_canvas = 1;
+-					}
++					if(created) redraw_canvas = 1;
+ 				}
+ 				else
+ 				{
+-					FloatAuto *previous = 0;
+-					FloatAuto *next = 0;
+-					float new_x = affected_x_autos->get_value(
+-						track_position, 
+-						PLAY_FORWARD,
+-						previous,
+-						next);
+-					previous = 0;
+-					next = 0;
+-					float new_y = affected_y_autos->get_value(
+-						track_position, 
+-						PLAY_FORWARD,
+-						previous,
+-						next);
+ 					gui->affected_x = 
+ 						(FloatAuto*)gui->cwindow->calculate_affected_auto(
+ 							affected_x_autos, 1, &created, 0);
+-					if(created) 
+-					{
+-						gui->affected_x->value = new_x;
+-						gui->affected_x->control_in_value = 0;
+-						gui->affected_x->control_out_value = 0;
+-						gui->affected_x->control_in_position = 0;
+-						gui->affected_x->control_out_position = 0;
+-						redraw_canvas = 1;
+-					}
++					if(created) redraw_canvas = 1;
+ 					gui->affected_y = 
+ 						(FloatAuto*)gui->cwindow->calculate_affected_auto(
+ 							affected_y_autos, 1, &created, 0);
+-					if(created) 
+-					{
+-						gui->affected_y->value = new_y;
+-						gui->affected_y->control_in_value = 0;
+-						gui->affected_y->control_out_value = 0;
+-						gui->affected_y->control_in_position = 0;
+-						gui->affected_y->control_out_position = 0;
+-						redraw_canvas = 1;
+-					}
++					if(created) redraw_canvas = 1;
+ 				}
+ 
+ 				calculate_origin();
+ 
+ 				if(gui->translating_zoom)
+ 				{
+-					gui->center_z = gui->affected_z->value;
++					gui->center_z = gui->affected_z->get_value();
+ 				}
+ 				else
+ 				{
+-					gui->center_x = gui->affected_x->value;
+-					gui->center_y = gui->affected_y->value;
++					gui->center_x = gui->affected_x->get_value();
++					gui->center_y = gui->affected_y->get_value();
+ 				}
+ 
+ 				rerender = 1;
+@@ -2364,22 +2316,23 @@ int CWindowCanvas::test_bezier(int butto
+ 
+ 			if(gui->translating_zoom)
+ 			{
+-				last_center_z = gui->affected_z->value;
++				last_center_z = gui->affected_z->get_value();
+ 			}
+ 			else
+ 			{
+-				last_center_x = gui->affected_x->value;
+-				last_center_y = gui->affected_y->value;
++				last_center_x = gui->affected_x->get_value();
++				last_center_y = gui->affected_y->get_value();
+ 			}
+ 
+ 			if(gui->translating_zoom)
+ 			{
+-				gui->affected_z->value = gui->center_z + 
++				float new_z = gui->center_z + 
+ 					(cursor_y - gui->y_origin) / 128;
+ 
+-				if(gui->affected_z->value < 0) gui->affected_z->value = 0;
+-				if(!EQUIV(last_center_z, gui->affected_z->value))
++				if(new_z < 0) new_z = 0;
++				if(!EQUIV(last_center_z, new_z))
+ 				{
++					gui->affected_z->set_value(new_z);
+ 					rerender = 1;
+ 					redraw = 1;
+ 					redraw_canvas = 1;
+@@ -2387,11 +2340,14 @@ int CWindowCanvas::test_bezier(int butto
+ 			}
+ 			else
+ 			{
+-				gui->affected_x->value = gui->center_x + cursor_x - gui->x_origin;
+-				gui->affected_y->value = gui->center_y + cursor_y - gui->y_origin;
+-				if(!EQUIV(last_center_x,  gui->affected_x->value) ||
+-				   	!EQUIV(last_center_y, gui->affected_y->value))
++				float new_x = gui->center_x + cursor_x - gui->x_origin;
++				float new_y = gui->center_y + cursor_y - gui->y_origin;
++
++				if(!EQUIV(last_center_x, new_x) ||
++				   !EQUIV(last_center_y, new_y))
+ 				{
++					gui->affected_x->set_value(new_x);
++					gui->affected_y->set_value(new_y);
+ 					rerender = 1;
+ 					redraw = 1;
+ 					redraw_canvas = 1;
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/cwindowtool.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/cwindowtool.C
+@@ -510,6 +510,103 @@ void CWindowEyedropGUI::update()
+ 
+ 
+ 
++/* Buttons to control Keyframe-Tangent-Mode for Projector or Camera */
++	
++// Configuration for all possible Keyframe Tangent Mode toggles
++struct _TGD {
++	FloatAuto::t_mode mode;
++	bool use_camera;
++	char* icon_id;
++	char* tooltip;
++};
++	
++const _TGD Camera_Tan_Smooth =
++	{	FloatAuto::SMOOTH,
++		true,
++		"tan_smooth",
++		_("\"smooth\" Tangent on current Camera Keyframes")
++	};
++const _TGD Camera_Tan_Linear =
++	{	FloatAuto::LINEAR,
++		true,
++		"tan_linear",
++		_("\"linear\" Tangent on current Camera Keyframes")
++	};
++const _TGD Projector_Tan_Smooth =
++	{	FloatAuto::SMOOTH,
++		false,
++		"tan_smooth",
++		_("\"smooth\" Tangent on current Projector Keyframes")
++	};
++const _TGD Projector_Tan_Linear =
++	{	FloatAuto::LINEAR,
++		false,
++		"tan_linear",
++		_("\"linear\" Tangent on current Projector Keyframes")
++	};
++	
++	
++// Implementation Class für Keyframe Tangent Mode buttons
++//
++// This button reflects the state of the "current" keyframe
++// (the nearest keyframe on the left) for all three automation
++// lines together. Clicking on this button (re)sets the tangent
++// mode for the three "current" keyframes simultanously, but
++// never creates a new keyframe.
++//
++class CWindowTangentToggle : public BC_Toggle
++{
++public:
++	CWindowTangentToggle(_TGD mode, MWindow *mwindow, CWindowToolGUI *gui, int x, int y);
++	void check_toggle_state(FloatAuto *x, FloatAuto *y, FloatAuto *z);
++	int handle_event();
++private:
++	_TGD cfg;	
++	MWindow *mwindow;
++	CWindowToolGUI *gui;
++};
++	
++	
++CWindowTangentToggle::CWindowTangentToggle(_TGD mode, MWindow *mwindow, CWindowToolGUI *gui, int x, int y)
++ : BC_Toggle(x, y, mwindow->theme->get_image_set(mode.icon_id), false),
++   cfg(mode)
++{
++	this->gui = gui;
++	this->mwindow = mwindow;
++	set_tooltip(cfg.tooltip);
++}
++	
++void CWindowTangentToggle::check_toggle_state(FloatAuto *x, FloatAuto *y, FloatAuto *z)
++{
++// the toggle state is only set to ON if all
++// three automation lines have the same tangent mode.
++// For mixed states the toggle stays off.
++	set_value( x->tangent_mode == this->cfg.mode &&
++	           y->tangent_mode == this->cfg.mode &&
++	           z->tangent_mode == this->cfg.mode
++	         ,true // redraw to show new state 
++	         );
++}
++	
++int CWindowTangentToggle::handle_event()
++{
++	FloatAuto *x=0, *y=0, *z=0;
++	Track *track = mwindow->cwindow->calculate_affected_track();
++	
++	if(track)
++	{	mwindow->cwindow->calculate_affected_autos(&x, &y, &z,
++			track, cfg.use_camera, 0,0,0); // don't create new keyframe
++		
++		if(x)	x->change_tangent_mode(cfg.mode);
++		if(y)	y->change_tangent_mode(cfg.mode);
++		if(z)	z->change_tangent_mode(cfg.mode);
++		
++		gui->update();
++		gui->update_preview();
++	}
++	
++	return 1;
++}
+ 
+ 
+ 
+@@ -555,7 +652,7 @@ void CWindowCameraGUI::create_objects()
+ 	this->x = new CWindowCoord(this, 
+ 		x, 
+ 		y, 
+-		x_auto ? x_auto->value : (float)0);
++		(float)0);
+ 	this->x->create_objects();
+ 	y += 30;
+ 	x = 10;
+@@ -564,7 +661,7 @@ void CWindowCameraGUI::create_objects()
+ 	this->y = new CWindowCoord(this, 
+ 		x, 
+ 		y, 
+-		y_auto ? y_auto->value : (float)0);
++		(float)0);
+ 	this->y->create_objects();
+ 	y += 30;
+ 	x = 10;
+@@ -573,7 +670,7 @@ void CWindowCameraGUI::create_objects()
+ 	this->z = new CWindowCoord(this, 
+ 		x, 
+ 		y, 
+-		z_auto ? z_auto->value : (float)1,
++		(float)1,
+ 		1);
+ 	this->z->create_objects();
+ 	this->z->set_boundaries((float).0001, (float)256.0);
+@@ -593,7 +690,15 @@ void CWindowCameraGUI::create_objects()
+ 	add_subwindow(button = new CWindowCameraMiddle(mwindow, this, x1, y));
+ 	x1 += button->get_w();
+ 	add_subwindow(button = new CWindowCameraBottom(mwindow, this, x1, y));
+-
++	
++// additional Buttons to control the tangent mode of the "current" keyframe
++	x1 += button->get_w() + 15;	 
++	add_subwindow(this->t_smooth = new CWindowTangentToggle(Camera_Tan_Smooth, mwindow, this, x1, y));
++	x1 += button->get_w();
++	add_subwindow(this->t_linear = new CWindowTangentToggle(Camera_Tan_Linear, mwindow, this, x1, y));
++	
++// fill in current auto keyframe values, set toggle states.
++	this->update();
+ }
+ 
+ void CWindowCameraGUI::update_preview()
+@@ -605,6 +710,11 @@ void CWindowCameraGUI::update_preview()
+ 			CHANGE_NONE,
+ 			mwindow->edl,
+ 			1);
++	// TODO: do we really need to lock the main window??
++	mwindow->gui->lock_window("CWindowCameraGUI::update_preview");
++	mwindow->gui->canvas->draw_overlays();
++	mwindow->gui->canvas->flash();
++	mwindow->gui->unlock_window();
+ 	mwindow->cwindow->gui->lock_window("CWindowCameraGUI::update_preview");
+ 	mwindow->cwindow->gui->canvas->draw_refresh();
+ 	mwindow->cwindow->gui->unlock_window();
+@@ -626,7 +736,8 @@ void CWindowCameraGUI::handle_event()
+ 				1);
+ 			if(x_auto)
+ 			{
+-				x_auto->value = atof(x->get_text());
++				x_auto->set_value(atof(x->get_text()));
++				update();
+ 				update_preview();
+ 			}
+ 		}
+@@ -638,7 +749,8 @@ void CWindowCameraGUI::handle_event()
+ 				1);
+ 			if(y_auto)
+ 			{
+-				y_auto->value = atof(y->get_text());
++				y_auto->set_value(atof(y->get_text()));
++				update();
+ 				update_preview();
+ 			}
+ 		}
+@@ -658,11 +770,12 @@ void CWindowCameraGUI::handle_event()
+ 	// 		if(zoom != atof(z->get_text())) 
+ 	// 			z->update(zoom);
+ 
+-				z_auto->value = zoom;
++				z_auto->set_value(zoom);
+ 				mwindow->gui->lock_window("CWindowCameraGUI::handle_event");
+ 				mwindow->gui->canvas->draw_overlays();
+ 				mwindow->gui->canvas->flash();
+ 				mwindow->gui->unlock_window();
++				update();
+ 				update_preview();
+ 			}
+ 		}
+@@ -689,22 +802,19 @@ void CWindowCameraGUI::update()
+ 	}
+ 
+ 	if(x_auto)
+-		x->update(x_auto->value);
++		x->update(x_auto->get_value());
+ 	if(y_auto)
+-		y->update(y_auto->value);
++		y->update(y_auto->get_value());
+ 	if(z_auto)
+-		z->update(z_auto->value);
++		z->update(z_auto->get_value());
++	
++	if( x_auto && y_auto && z_auto )
++	{
++		t_smooth->check_toggle_state(x_auto, y_auto, z_auto);
++		t_linear->check_toggle_state(x_auto, y_auto, z_auto);
++	}
+ }
+ 
+-// BezierAuto* CWindowCameraGUI::get_keyframe()
+-// {
+-// 	BezierAuto *keyframe = 0;
+-// 	Track *track = mwindow->cwindow->calculate_affected_track();
+-// 	if(track)
+-// 		keyframe = (BezierAuto*)mwindow->cwindow->calculate_affected_auto(
+-// 			track->automation->autos[AUTOMATION_CAMERA]);
+-// 	return keyframe;
+-// }
+ 
+ 
+ 
+@@ -742,9 +852,9 @@ int CWindowCameraLeft::handle_event()
+ 
+ 		if(w && h)
+ 		{
+-			x_auto->value = 
+-				(double)track->track_w / z_auto->value / 2 - 
+-				(double)w / 2;
++			x_auto->set_value(
++				(double)track->track_w / z_auto->get_value() / 2 - 
++				(double)w / 2);
+ 			gui->update();
+ 			gui->update_preview();
+ 		}
+@@ -772,7 +882,7 @@ int CWindowCameraCenter::handle_event()
+ 
+ 	if(x_auto)
+ 	{
+-		x_auto->value = 0;
++		x_auto->set_value(0);
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+@@ -815,8 +925,8 @@ int CWindowCameraRight::handle_event()
+ 
+ 		if(w && h)
+ 		{
+-			x_auto->value = -((double)track->track_w / z_auto->value / 2 - 
+-				(double)w / 2);
++			x_auto->set_value( -((double)track->track_w / z_auto->get_value() / 2 - 
++				(double)w / 2));
+ 			gui->update();
+ 			gui->update_preview();
+ 		}
+@@ -860,8 +970,8 @@ int CWindowCameraTop::handle_event()
+ 
+ 		if(w && h)
+ 		{
+-			y_auto->value = (double)track->track_h / z_auto->value / 2 - 
+-				(double)h / 2;
++			y_auto->set_value((double)track->track_h / z_auto->get_value() / 2 - 
++				(double)h / 2);
+ 			gui->update();
+ 			gui->update_preview();
+ 		}
+@@ -888,7 +998,7 @@ int CWindowCameraMiddle::handle_event()
+ 
+ 	if(y_auto)
+ 	{
+-		y_auto->value = 0;
++		y_auto->set_value(0);
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+@@ -931,8 +1041,8 @@ int CWindowCameraBottom::handle_event()
+ 
+ 		if(w && h)
+ 		{
+-			y_auto->value = -((double)track->track_h / z_auto->value / 2 - 
+-				(double)h / 2);
++			y_auto->set_value(-((double)track->track_h / z_auto->get_value() / 2 - 
++				(double)h / 2));
+ 			gui->update();
+ 			gui->update_preview();
+ 		}
+@@ -995,7 +1105,7 @@ void CWindowProjectorGUI::create_objects
+ 	this->x = new CWindowCoord(this, 
+ 		x, 
+ 		y, 
+-		x_auto ? x_auto->value : (float)0);
++		(float)0);
+ 	this->x->create_objects();
+ 	y += 30;
+ 	x = 10;
+@@ -1004,7 +1114,7 @@ void CWindowProjectorGUI::create_objects
+ 	this->y = new CWindowCoord(this, 
+ 		x, 
+ 		y, 
+-		y_auto ? y_auto->value : (float)0);
++		(float)0);
+ 	this->y->create_objects();
+ 	y += 30;
+ 	x = 10;
+@@ -1013,7 +1123,7 @@ void CWindowProjectorGUI::create_objects
+ 	this->z = new CWindowCoord(this, 
+ 		x, 
+ 		y, 
+-		z_auto ? z_auto->value : (float)1,
++		(float)1,
+ 		1);
+ 	this->z->create_objects();
+ 	this->z->set_boundaries((float).0001, (float)256.0);
+@@ -1033,7 +1143,15 @@ void CWindowProjectorGUI::create_objects
+ 	add_subwindow(button = new CWindowProjectorMiddle(mwindow, this, x1, y));
+ 	x1 += button->get_w();
+ 	add_subwindow(button = new CWindowProjectorBottom(mwindow, this, x1, y));
+-
++	
++// additional Buttons to control the tangent mode of the "current" keyframe
++	x1 += button->get_w() + 15;
++	add_subwindow(this->t_smooth = new CWindowTangentToggle(Projector_Tan_Smooth, mwindow, this, x1, y));
++	x1 += button->get_w();
++	add_subwindow(this->t_linear = new CWindowTangentToggle(Projector_Tan_Linear, mwindow, this, x1, y));
++	
++// fill in current auto keyframe values, set toggle states.	
++	this->update();
+ }
+ 
+ void CWindowProjectorGUI::update_preview()
+@@ -1044,6 +1162,11 @@ void CWindowProjectorGUI::update_preview
+ 			CHANGE_NONE,
+ 			mwindow->edl,
+ 			1);
++	// TODO: really need to lock the main window??
++	mwindow->gui->lock_window("CWindowProjectorGUI::update_preview");
++	mwindow->gui->canvas->draw_overlays();
++	mwindow->gui->canvas->flash();
++	mwindow->gui->unlock_window();
+ 	mwindow->cwindow->gui->lock_window("CWindowProjectorGUI::update_preview");
+ 	mwindow->cwindow->gui->canvas->draw_refresh();
+ 	mwindow->cwindow->gui->unlock_window();
+@@ -1065,7 +1188,8 @@ void CWindowProjectorGUI::handle_event()
+ 				1);
+ 			if(x_auto)
+ 			{
+-				x_auto->value = atof(x->get_text());
++				x_auto->set_value(atof(x->get_text()));
++				update();
+ 				update_preview();
+ 			}
+ 		}
+@@ -1077,7 +1201,8 @@ void CWindowProjectorGUI::handle_event()
+ 				1);
+ 			if(y_auto)
+ 			{
+-				y_auto->value = atof(y->get_text());
++				y_auto->set_value(atof(y->get_text()));
++				update();
+ 				update_preview();
+ 			}
+ 		}
+@@ -1095,13 +1220,14 @@ void CWindowProjectorGUI::handle_event()
+ 				if(zoom < 0) zoom = 0;
+ // 			if (zoom != atof(z->get_text())) 
+ // 				z->update(zoom);
+-				z_auto->value = zoom;
++				z_auto->set_value(zoom);
+ 
+ 				mwindow->gui->lock_window("CWindowProjectorGUI::handle_event");
+ 				mwindow->gui->canvas->draw_overlays();
+ 				mwindow->gui->canvas->flash();
+ 				mwindow->gui->unlock_window();
+ 
++				update();
+ 				update_preview();
+ 			}
+ 		}
+@@ -1128,22 +1254,19 @@ void CWindowProjectorGUI::update()
+ 	}
+ 
+ 	if(x_auto)
+-		x->update(x_auto->value);
++		x->update(x_auto->get_value());
+ 	if(y_auto)
+-		y->update(y_auto->value);
++		y->update(y_auto->get_value());
+ 	if(z_auto)
+-		z->update(z_auto->value);
++		z->update(z_auto->get_value());
++	
++	if( x_auto && y_auto && z_auto )
++	{	
++		t_smooth->check_toggle_state(x_auto, y_auto, z_auto);
++		t_linear->check_toggle_state(x_auto, y_auto, z_auto);
++	}
+ }
+ 
+-// BezierAuto* CWindowProjectorGUI::get_keyframe()
+-// {
+-// 	BezierAuto *keyframe = 0;
+-// 	Track *track = mwindow->cwindow->calculate_affected_track();
+-// 	if(track)
+-// 		keyframe = (BezierAuto*)mwindow->cwindow->calculate_affected_auto(
+-// 			track->automation->autos[AUTOMATION_PROJECTOR]);
+-// 	return keyframe;
+-// }
+ 
+ 
+ 
+@@ -1207,8 +1330,8 @@ int CWindowProjectorLeft::handle_event()
+ 	}
+ 	if(x_auto && z_auto)
+ 	{
+-		x_auto->value = (double)track->track_w * z_auto->value / 2 - 
+-			(double)mwindow->edl->session->output_w / 2;
++		x_auto->set_value( (double)track->track_w * z_auto->get_value() / 2 - 
++			(double)mwindow->edl->session->output_w / 2 );
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+@@ -1235,7 +1358,7 @@ int CWindowProjectorCenter::handle_event
+ 
+ 	if(x_auto)
+ 	{
+-		x_auto->value = 0;
++		x_auto->set_value(0);
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+@@ -1270,8 +1393,8 @@ int CWindowProjectorRight::handle_event(
+ 
+ 	if(x_auto && z_auto)
+ 	{
+-		x_auto->value = -((double)track->track_w * z_auto->value / 2 - 
+-			(double)mwindow->edl->session->output_w / 2);
++		x_auto->set_value( -((double)track->track_w * z_auto->get_value() / 2 - 
++			(double)mwindow->edl->session->output_w / 2));
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+@@ -1306,8 +1429,8 @@ int CWindowProjectorTop::handle_event()
+ 
+ 	if(y_auto && z_auto)
+ 	{
+-		y_auto->value = (double)track->track_h * z_auto->value / 2 - 
+-			(double)mwindow->edl->session->output_h / 2;
++		y_auto->set_value( (double)track->track_h * z_auto->get_value() / 2 - 
++			(double)mwindow->edl->session->output_h / 2 );
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+@@ -1333,7 +1456,7 @@ int CWindowProjectorMiddle::handle_event
+ 
+ 	if(y_auto)
+ 	{
+-		y_auto->value = 0;
++		y_auto->set_value(0);
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+@@ -1368,8 +1491,8 @@ int CWindowProjectorBottom::handle_event
+ 
+ 	if(y_auto && z_auto)
+ 	{
+-		y_auto->value = -((double)track->track_h * z_auto->value / 2 - 
+-			(double)mwindow->edl->session->output_h / 2);
++		y_auto->set_value( -((double)track->track_h * z_auto->get_value() / 2 - 
++			(double)mwindow->edl->session->output_h / 2));
+ 		gui->update();
+ 		gui->update_preview();
+ 	}
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/cwindowtool.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/cwindowtool.h
+@@ -31,6 +31,7 @@
+ 
+ class CWindowToolGUI;
+ class CWindowCoord;
++class CWindowTangentToggle;
+ 
+ 
+ // This common thread supports all the tool GUI's.
+@@ -263,6 +264,9 @@ public:
+ 	void handle_event();
+ //	BezierAuto* get_keyframe();
+ 	CWindowCoord *x, *y, *z;
++private:
++// Toggles for keyframe tangent mode (for camera automation only)
++	CWindowTangentToggle *t_smooth, *t_linear;
+ };
+ 
+ class CWindowCameraLeft : public BC_Button
+@@ -330,6 +334,9 @@ public:
+ 	void handle_event();
+ //	BezierAuto* get_keyframe();
+ 	CWindowCoord *x, *y, *z;
++private:
++// Toggles for keyframe tangent mode (projector automation only)
++	CWindowTangentToggle *t_smooth, *t_linear;
+ };
+ 
+ class CWindowProjectorLeft : public BC_Button
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/floatauto.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/floatauto.C
+@@ -24,7 +24,10 @@
+ #include "edl.h"
+ #include "filexml.h"
+ #include "floatauto.h"
++#include "floatautos.h"
+ #include "localsession.h"
++#include "transportque.inc"
++#include "automation.inc"
+ 
+ FloatAuto::FloatAuto(EDL *edl, FloatAutos *autos)
+  : Auto(edl, (Autos*)autos)
+@@ -34,10 +37,23 @@ FloatAuto::FloatAuto(EDL *edl, FloatAuto
+ 	control_out_value = 0;
+ 	control_in_position = 0;
+ 	control_out_position = 0;
++	pos_valid    = -1; //"dirty"
++	tangent_mode = SMOOTH;
++//  note: in most cases the tangent_mode-value is set   
++//        by the method interpolate_from() rsp. copy_from()
+ }
+ 
+ FloatAuto::~FloatAuto()
+ {
++	// as we are going away, the neighbouring float auto nodes 
++	// need to re-adjust their ctrl point positions and tangents
++	if(is_floatauto_node(this))
++	{
++		if (next)
++			((FloatAuto*)next)->tangent_dirty();
++		if (previous)
++			((FloatAuto*)previous)->tangent_dirty();
++	}
+ }
+ 
+ int FloatAuto::operator==(Auto &that)
+@@ -52,58 +68,37 @@ int FloatAuto::operator==(FloatAuto &tha
+ }
+ 
+ 
++inline 
++bool FloatAuto::is_floatauto_node(Auto *candidate)
++{
++	return (candidate && candidate->autos &&
++		AUTOMATION_TYPE_FLOAT == candidate->autos->get_type());
++}
++
++
+ int FloatAuto::identical(FloatAuto *src)
+ {
+ 	return EQUIV(value, src->value) &&
+ 		EQUIV(control_in_value, src->control_in_value) &&
+-		EQUIV(control_out_value, src->control_out_value) &&
+-		control_in_position == src->control_in_position &&
+-		control_out_position == src->control_out_position;
++		EQUIV(control_out_value, src->control_out_value);
++		// ctrl positions ignored, as they may depend on neighbours
++		// tangent_mode is ignored, no recalculations
+ }
+ 
++/* Note: the following is essentially display-code and has been moved to: 
++ *  TrackCanvas::value_to_percentage(float auto_value, int autogrouptype)
++ * 
++float FloatAuto::value_to_percentage()
++{
++}
++float FloatAuto::value_to_percentage()
++{
++}
+ float FloatAuto::value_to_percentage()
+ {
+-	if(!edl) return 0;
+-	float automation_min = edl->local_session->automation_mins[autos->autogrouptype];
+-	float automation_max = edl->local_session->automation_maxs[autos->autogrouptype];
+-	float automation_range = automation_max - automation_min;
+-	return (value - automation_min) / automation_range;
+-}
+-
+-float FloatAuto::invalue_to_percentage()
+-{
+-	if(!edl) return 0;
+-	float automation_min = edl->local_session->automation_mins[autos->autogrouptype];
+-	float automation_max = edl->local_session->automation_maxs[autos->autogrouptype];
+-	float automation_range = automation_max - automation_min;
+-	return (value + control_in_value - automation_min) / 
+-		automation_range;
+-}
+-
+-float FloatAuto::outvalue_to_percentage()
+-{
+-	if(!edl) return 0;
+-	float automation_min = edl->local_session->automation_mins[autos->autogrouptype];
+-	float automation_max = edl->local_session->automation_maxs[autos->autogrouptype];
+-	float automation_range = automation_max - automation_min;
+-	return (value + control_out_value - automation_min) / 
+-		automation_range;
+-}
+-
+-// float FloatAuto::percentage_to_value(float percentage)
+-// {
+-// 	return percentage * (autos->max - autos->min) + autos->min;
+-// }
+-// 
+-// float FloatAuto::percentage_to_invalue(float percentage)
+-// {
+-// 	return percentage * (autos->max - autos->min) + autos->min - value;
+-// }
+-// 
+-// float FloatAuto::percentage_to_outvalue(float percentage)
+-// {
+-// 	return percentage * (autos->max - autos->min) + autos->min - value;
+-// }
++}
++*/
++
+ 
+ void FloatAuto::copy_from(Auto *that)
+ {
+@@ -118,8 +113,263 @@ void FloatAuto::copy_from(FloatAuto *tha
+ 	this->control_out_value = that->control_out_value;
+ 	this->control_in_position = that->control_in_position;
+ 	this->control_out_position = that->control_out_position;
++	this->tangent_mode = that->tangent_mode;
++// note: literate copy, no recalculations    
++}
++
++inline
++void FloatAuto::handle_automatic_tangent_after_copy()
++// in most cases, we don't want to use the manual tangent modes
++// of the left neighbour used as a template for interpolation.
++// Rather, we (re)set to automatically smoothed tangents. Note
++// auto generated nodes (while tweaking values) indeed are
++// inserted by using this "interpolation" approach, thus making 
++// this defaulting to auto-smooth tangents very important.
++{
++	if(tangent_mode == FREE || tangent_mode == TFREE)
++	{
++		this->tangent_mode = SMOOTH;
++	}
++}
++
++
++int FloatAuto::interpolate_from(Auto *a1, Auto *a2, int64_t pos, Auto *templ)
++// bézier interpolates this->value and tangents for the given position
++// between the positions of a1 and a2. If a1 or a2 are omitted, they default
++// to this->previous and this->next. If this FloatAuto has automatic tangents,
++// this may trigger re-adjusting of this and its neighbours in this->autos.
++// Note while a1 and a2 need not be members of this->autos, automatic 
++// readjustments are always done to the neighbours in this->autos.
++// If the template is given, it will be used to fill out this
++// objects fields prior to interpolating.
++{
++	if(!a1) a1 = previous;
++	if(!a2) a2 = next;
++	Auto::interpolate_from(a1, a2, pos, templ);
++	handle_automatic_tangent_after_copy();
++	
++	// set this->value using bézier interpolation if possible
++	if(is_floatauto_node(a1) && is_floatauto_node(a2) &&
++	   a1->position <= pos && pos <= a2->position)
++	{
++		FloatAuto *left = (FloatAuto*)a1;
++		FloatAuto *right = (FloatAuto*)a2;
++		float new_value = FloatAutos::calculate_bezier(left, right, pos);
++		float new_slope = FloatAutos::calculate_bezier_derivation(left, right, pos);
++		
++		this->adjust_to_new_coordinates(pos, new_value); // this may trigger smoothing
++		
++		this->set_control_in_value(new_slope * control_in_position);
++		this->set_control_out_value(new_slope * control_out_position);
++		return 1; //return true: interpolated indeed...
++	}
++	else
++	{
++		adjust_ctrl_positions(); // implies adjust_tangents()
++		return 0; // unable to interpolate
++	}
++}
++
++
++void FloatAuto::change_tangent_mode(t_mode new_mode)
++{
++	if(new_mode == TFREE && !(control_in_position && control_out_position))
++		new_mode = FREE; // only if tangents on both sides...
++
++	tangent_mode = new_mode;
++	adjust_tangents();
++}
++
++void FloatAuto::toggle_tangent_mode()
++{
++	switch (tangent_mode) {
++		case SMOOTH:	change_tangent_mode(TFREE);  break;
++		case LINEAR:	change_tangent_mode(FREE);   break;
++		case TFREE :	change_tangent_mode(LINEAR); break;
++		case FREE  :	change_tangent_mode(SMOOTH); break;
++	}
++}
++
++
++void FloatAuto::set_value(float newvalue)
++{
++	this->value=newvalue; 
++	this->adjust_tangents();
++	if(previous) ((FloatAuto*)previous)->adjust_tangents();
++	if(next)     ((FloatAuto*)next)->adjust_tangents();
++} 
++
++void FloatAuto::set_control_in_value(float newvalue)
++{
++	switch(tangent_mode) {
++		case TFREE:	control_out_value = control_out_position*newvalue / control_in_position;
++		case FREE:	control_in_value = newvalue;
++		default:	return; // otherwise calculated automatically...
++	}
++}
++
++void FloatAuto::set_control_out_value(float newvalue)
++{
++	switch(tangent_mode) {
++		case TFREE:	control_in_value = control_in_position*newvalue / control_out_position;
++		case FREE:	control_out_value=newvalue;
++		default:	return;
++	}
++}
++
++
++
++inline int sgn(float value) { return (value == 0)?  0 : (value < 0) ? -1 : 1; }
++
++inline float weighted_mean(float v1, float v2, float w1, float w2){
++	if(0.000001 > fabs(w1 + w2))
++		return 0;
++	else
++		return (w1 * v1 + w2 * v2) / (w1 + w2);
++}
++
++
++
++
++void FloatAuto::adjust_tangents()
++// recalculates tangents if current mode 
++// implies automatic adjustment of tangents
++{
++	if(!autos) return;
++
++	if(tangent_mode == SMOOTH)
++	{
++		// normally, one would use the slope of chord between the neighbours.
++		// but this could cause the curve to overshot extremal automation nodes.
++		// (e.g when setting a fade node at zero, the curve could go negative)
++		// we can interpret the slope of chord as a weighted mean value, where
++		// the length of the interval is used as weight; we just use other 
++		// weights: intervall length /and/ reciprocal of slope. So, if the
++		// connection to one of the neighbours has very low slope this will
++		// dominate the calculated tangent slope at this automation node.
++		// if the slope goes beyond the zero line, e.g if left connection
++		// has positive and right connection has negative slope, then
++		// we force the calculated tangent to be horizontal.
++		float s, dxl, dxr, sl, sr;
++		calculate_slope((FloatAuto*) previous, this, sl, dxl);
++		calculate_slope(this, (FloatAuto*) next, sr, dxr);
++		
++		if(0 < sgn(sl) * sgn(sr))
++		{
++			float wl = fabs(dxl) * (fabs(1.0/sl) + 1);
++			float wr = fabs(dxr) * (fabs(1.0/sr) + 1);
++			s = weighted_mean(sl, sr, wl, wr);
++		}
++		else s = 0; // fixed hoizontal tangent
++		
++		control_in_value = s * control_in_position;
++		control_out_value = s * control_out_position;
++	}
++	
++	else
++	if(tangent_mode == LINEAR)
++ 	{
++		float g, dx;
++		if(previous)
++		{
++			calculate_slope(this, (FloatAuto*)previous, g, dx);
++			control_in_value = g * dx / 3;
++		}
++		if(next)
++		{
++			calculate_slope(this, (FloatAuto*)next, g, dx);
++			control_out_value = g * dx / 3;
++	}	}
++	
++	else
++	if(tangent_mode == TFREE && control_in_position && control_out_position)
++ 	{
++		float gl = control_in_value / control_in_position;
++		float gr = control_out_value / control_out_position;
++		float wl = fabs(control_in_value);
++		float wr = fabs(control_out_value);
++		float g = weighted_mean(gl, gr, wl, wr);
++		
++		control_in_value = g * control_in_position;
++		control_out_value = g * control_out_position;
++	}
++}
++
++inline void FloatAuto::calculate_slope(FloatAuto *left, FloatAuto *right, float &dvdx, float &dx)
++{
++	dvdx=0; dx=0;
++	if(!left || !right) return;
++
++	dx = right->position - left->position;
++	float dv = right->value - left->value;
++	dvdx = (dx == 0) ? 0 : dv/dx;
++}
++
++
++void FloatAuto::adjust_ctrl_positions(FloatAuto *prev, FloatAuto *next)
++// recalculates location of ctrl points to be
++// always 1/3 and 2/3 of the distance to the
++// next neighbours. The reason is: for this special
++// distance the bézier function yields x(t) = t, i.e.
++// we can use the y(t) as if it was a simple function y(x).
++   
++// This adjustment is done only on demand and involves 
++// updating neighbours and adjust_tangents() as well.
++{ 
++	if(!prev && !next)
++	{	// use current siblings
++		prev = (FloatAuto*)this->previous;
++		next = (FloatAuto*)this->next;
++	}	
++	
++	if(prev)
++	{	set_ctrl_positions(prev, this);
++		prev->adjust_tangents();
++	}
++	else // disable tangent on left side
++		control_in_position = 0;
++	
++	if(next) 
++	{	set_ctrl_positions(this, next);
++		next->adjust_tangents();
++	}
++	else // disable right tangent
++		control_out_position = 0;
++	
++	this->adjust_tangents();
++	pos_valid = position;
++// tangents up-to-date	
++}
++
++
++
++inline void redefine_tangent(int64_t &old_pos, int64_t new_pos, float &ctrl_val)
++{
++	if(old_pos != 0)
++		ctrl_val *= (float)new_pos / old_pos;
++	old_pos = new_pos;
++}
++
++
++inline void FloatAuto::set_ctrl_positions(FloatAuto *prev, FloatAuto* next)
++{
++	int64_t distance = next->position - prev->position;
++	redefine_tangent(prev->control_out_position, +distance / 3,  prev->control_out_value);
++	redefine_tangent(next->control_in_position,  -distance / 3,  next->control_in_value);
++}
++
++
++
++void FloatAuto::adjust_to_new_coordinates(int64_t position, float value)
++// define new position and value in one step, do necessary re-adjustments
++{
++	this->value = value;
++	this->position = position;
++	adjust_ctrl_positions();
+ }
+ 
++
++
+ int FloatAuto::value_to_str(char *string, float value)
+ {
+ 	int j = 0, i = 0;
+@@ -160,10 +410,9 @@ void FloatAuto::copy(int64_t start, int6
+ 	else
+ 		file->tag.set_property("POSITION", position - start);
+ 	file->tag.set_property("VALUE", value);
+-	file->tag.set_property("CONTROL_IN_VALUE", control_in_value);
+-	file->tag.set_property("CONTROL_OUT_VALUE", control_out_value);
+-	file->tag.set_property("CONTROL_IN_POSITION", control_in_position);
+-	file->tag.set_property("CONTROL_OUT_POSITION", control_out_position);
++	file->tag.set_property("CONTROL_IN_VALUE", control_in_value / 2.0); // compatibility, see below
++	file->tag.set_property("CONTROL_OUT_VALUE", control_out_value / 2.0);
++	file->tag.set_property("TANGENT_MODE", (int)tangent_mode);
+ 	file->append_tag();
+ 	file->tag.set_title("/AUTO");
+ 	file->append_tag();
+@@ -175,6 +424,15 @@ void FloatAuto::load(FileXML *file)
+ 	value = file->tag.get_property("VALUE", value);
+ 	control_in_value = file->tag.get_property("CONTROL_IN_VALUE", control_in_value);
+ 	control_out_value = file->tag.get_property("CONTROL_OUT_VALUE", control_out_value);
+-	control_in_position = file->tag.get_property("CONTROL_IN_POSITION", control_in_position);
+-	control_out_position = file->tag.get_property("CONTROL_OUT_POSITION", control_out_position);
++	tangent_mode = (t_mode)file->tag.get_property("TANGENT_MODE", FREE);
++	
++	// Compatibility to old session data format:
++	// Versions previous to the bezier auto patch (Jun 2006) applied a factor 2
++	// to the y-coordinates of ctrl points while calculating the bezier function.
++	// To retain compatibility, we now apply this factor while loading
++	control_in_value *= 2.0;
++	control_out_value *= 2.0;
++
++// restore ctrl positions and adjust tangents if necessary
++	adjust_ctrl_positions();
+ }
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/floatauto.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/floatauto.h
+@@ -42,16 +42,55 @@ public:
+ 	int identical(FloatAuto *src);
+ 	void copy_from(Auto *that);
+ 	void copy_from(FloatAuto *that);
++	int interpolate_from(Auto *a1, Auto *a2, int64_t pos, Auto *templ=0); // bezier interpolation
+ 	void copy(int64_t start, int64_t end, FileXML *file, int default_only);
+ 	void load(FileXML *xml);
+ 
+- 	float value_to_percentage();
+- 	float invalue_to_percentage();
+- 	float outvalue_to_percentage();
+-/* 	float percentage_to_value(float percentage);
+- * 	float percentage_to_invalue(float percentage);
+- * 	float percentage_to_outvalue(float percentage);
+- */
++
++// "the value" (=payload of this keyframe)
++	float get_value() {return this->value;}
++	void  set_value(float newval);
++
++// Possible policies to handle the tagents for the 
++// bézier curves connecting adjacent automation points
++	enum t_mode 
++	{
++		SMOOTH,     // tangents are coupled in order to yield a smooth curve
++		LINEAR,     // tangents always pointing directly to neighbouring automation points
++		TFREE,      // tangents on both sides coupled but editable by dragging the handles
++		FREE        // tangents on both sides are independent and editable via GUI
++	};
++
++	t_mode tangent_mode;
++	void change_tangent_mode(t_mode); // recalculates tangents as well
++	void toggle_tangent_mode();       // cycles through all modes (e.g. by ctrl-click)
++	
++
++// Control values (y coords of bézier control point), relative to value
++	float get_control_in_value()            {check_pos(); return this->control_in_value;}
++	float get_control_out_value()           {check_pos(); return this->control_out_value;}
++	void set_control_in_value(float newval);
++	void set_control_out_value(float newval);
++	
++// get calculated x-position of control points for drawing, 
++// relative to auto position, in native units of the track.
++	int64_t get_control_in_position()       {check_pos(); return this->control_in_position;}
++	int64_t get_control_out_position()      {check_pos(); return this->control_out_position;}
++	
++// define new position and value, re-adjust ctrl point, notify neighbours
++	void adjust_to_new_coordinates(int64_t position, float value);
++
++
++
++private:
++	void adjust_tangents();             // recalc. ctrk in and out points, if automatic tangent mode (SMOOTH or LINEAR)
++	void adjust_ctrl_positions(FloatAuto *p=0, FloatAuto *n=0); // recalc. x location of ctrl points, notify neighbours
++	void set_ctrl_positions(FloatAuto*, FloatAuto*);
++	void calculate_slope(FloatAuto* a1, FloatAuto* a2, float& dvdx, float& dx);
++	void check_pos()                    { if(position != pos_valid) adjust_ctrl_positions(); }
++	void tangent_dirty()                { pos_valid=-1; }
++	static bool is_floatauto_node(Auto *candidate); // check is member of FloatAutos-Collection
++	void handle_automatic_tangent_after_copy();	
+ 
+ // Control values are relative to value
+ 	float value, control_in_value, control_out_value;
+@@ -59,7 +98,7 @@ public:
+ // In native units of the track.
+ 	int64_t control_in_position, control_out_position;
+ 
+-private:
++	int64_t pos_valid;                  // 'dirty flag' to recalculate ctrl point positions on demand
+ 	int value_to_str(char *string, float value);
+ };
+ 
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/floatautos.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/floatautos.C
+@@ -54,24 +54,20 @@ void FloatAutos::straighten(int64_t star
+ // Is current auto in range?		
+ 		if(current->position >= start && current->position < end)
+ 		{
+-			float current_value = current->value;
++			float current_value = current->get_value();
+ 
+ // Determine whether to set the control in point.
+ 			if(previous_auto && previous_auto->position >= start)
+ 			{
+-				float previous_value = previous_auto->value;
+-				current->control_in_value = (previous_value - current_value) / 6.0;
+-				if(!current->control_in_position)
+-					current->control_in_position = -track->to_units(1.0, 0);
++				float previous_value = previous_auto->get_value();
++				current->set_control_in_value((previous_value - current_value) / 3.0);
+ 			}
+ 
+ // Determine whether to set the control out point
+ 			if(next_auto && next_auto->position < end)
+ 			{
+-				float next_value = next_auto->value;
+-				current->control_out_value = (next_value - current_value) / 6.0;
+-				if(!current->control_out_position)
+-					current->control_out_position = track->to_units(1.0, 0);
++				float next_value = next_auto->get_value();
++				current->set_control_out_value( (next_value - current_value) / 3.0);
+ 			}
+ 		}
+ 		current = (FloatAuto*)NEXT;
+@@ -92,9 +88,7 @@ Auto* FloatAutos::add_auto(int64_t posit
+ 	FloatAuto* result;
+ 	
+ 	insert_before(current, result = (FloatAuto*)new_auto());
+-
+-	result->position = position;
+-	result->value = value;
++	result->adjust_to_new_coordinates(position,value);
+ 	
+ 	return result;
+ }
+@@ -102,7 +96,7 @@ Auto* FloatAutos::add_auto(int64_t posit
+ Auto* FloatAutos::new_auto()
+ {
+ 	FloatAuto *result = new FloatAuto(edl, this);
+-	result->value = default_;
++	result->set_value(default_);
+ 	return result;
+ }
+ 
+@@ -132,28 +126,28 @@ int FloatAutos::automation_is_constant(i
+ // No keyframes on track
+ 	if(total_autos == 0)
+ 	{
+-		constant = ((FloatAuto*)default_auto)->value;
++		constant = ((FloatAuto*)default_auto)->get_value();
+ 		return 1;
+ 	}
+ 	else
+ // Only one keyframe on track.
+ 	if(total_autos == 1)
+ 	{
+-		constant = ((FloatAuto*)first)->value;
++		constant = ((FloatAuto*)first)->get_value();
+ 		return 1;
+ 	}
+ 	else
+ // Last keyframe is before region
+ 	if(last->position <= start)
+ 	{
+-		constant = ((FloatAuto*)last)->value;
++		constant = ((FloatAuto*)last)->get_value();
+ 		return 1;
+ 	}
+ 	else
+ // First keyframe is after region
+ 	if(first->position > end)
+ 	{
+-		constant = ((FloatAuto*)first)->value;
++		constant = ((FloatAuto*)first)->get_value();
+ 		return 1;
+ 	}
+ 
+@@ -171,7 +165,7 @@ int FloatAutos::automation_is_constant(i
+ 			current->position >= end)
+ 		{
+ // Get value now in case change doesn't occur
+-			constant = float_current->value;
++			constant = float_current->get_value();
+ 			test_previous_current = 1;
+ 		}
+ 		prev_position = current->position;
+@@ -183,7 +177,7 @@ int FloatAutos::automation_is_constant(i
+ 		{
+ 
+ // Get value now in case change doesn't occur
+-			constant = float_current->value;
++			constant = float_current->get_value();
+ 
+ // Keyframe has neighbor
+ 			if(current->previous)
+@@ -203,9 +197,9 @@ int FloatAutos::automation_is_constant(i
+ 			FloatAuto *float_next = (FloatAuto*)current->next;
+ 
+ // Change occurs between keyframes
+-			if(!EQUIV(float_current->value, float_next->value) ||
+-				!EQUIV(float_current->control_out_value, 0) ||
+-				!EQUIV(float_next->control_in_value, 0))
++			if(!EQUIV(float_current->get_value(), float_next->get_value()) ||
++				!EQUIV(float_current->get_control_out_value(), 0) ||
++				!EQUIV(float_next->get_control_in_value(), 0))
+ 			{
+ 				return 0;
+ 			}
+@@ -216,9 +210,9 @@ int FloatAutos::automation_is_constant(i
+ 			FloatAuto *float_previous = (FloatAuto*)current->previous;
+ 
+ // Change occurs between keyframes
+-			if(!EQUIV(float_current->value, float_previous->value) ||
+-				!EQUIV(float_current->control_in_value, 0) ||
+-				!EQUIV(float_previous->control_out_value, 0))
++			if(!EQUIV(float_current->get_value(), float_previous->get_value()) ||
++				!EQUIV(float_current->get_control_in_value(), 0) ||
++				!EQUIV(float_previous->get_control_out_value(), 0))
+ 			{
+ // printf("FloatAutos::automation_is_constant %d %d %d %f %f %f %f\n", 
+ // start, 
+@@ -253,87 +247,68 @@ double FloatAutos::get_automation_consta
+ // no autos at all so use default value
+ 	if(!current_auto) current_auto = default_auto;
+ 
+-	return ((FloatAuto*)current_auto)->value;
++	return ((FloatAuto*)current_auto)->get_value();
+ }
+ 
+ 
+ float FloatAutos::get_value(int64_t position, 
+-	int direction, 
+ 	FloatAuto* &previous, 
+ 	FloatAuto* &next)
+ {
+-	double slope;
+-	double intercept;
+-	int64_t slope_len;
+ // Calculate bezier equation at position
+-	float y0, y1, y2, y3;
+- 	float t;
++// prev and next will be used to shorten the search, if given
+ 
+-	previous = (FloatAuto*)get_prev_auto(position, direction, (Auto* &)previous, 0);
+-	next = (FloatAuto*)get_next_auto(position, direction, (Auto* &)next, 0);
++	previous = (FloatAuto*)get_prev_auto(position, PLAY_FORWARD, (Auto* &)previous, 0);
++	next     = (FloatAuto*)get_next_auto(position, PLAY_FORWARD, (Auto* &)next, 0);
+ 
+ // Constant
+ 	if(!next && !previous)
+ 	{
+-		return ((FloatAuto*)default_auto)->value;
++		return ((FloatAuto*)default_auto)->get_value();
+ 	}
+ 	else
+ 	if(!previous)
+ 	{
+-		return next->value;
++		return next->get_value();
+ 	}
+ 	else
+ 	if(!next)
+ 	{
+-		return previous->value;
++		return previous->get_value();
+ 	}
+ 	else
+-	if(next == previous)
++	if(next == previous || next->position == previous->position)
+ 	{
+-		return previous->value;
++		return previous->get_value();
+ 	}
+ 	else
+ 	{
+-		if(direction == PLAY_FORWARD &&
+-			EQUIV(previous->value, next->value) &&
+-			EQUIV(previous->control_out_value, 0) &&
+-			EQUIV(next->control_in_value, 0))
+-		{
+-			return previous->value;
+-		}
+-		else
+-		if(direction == PLAY_REVERSE &&
+-			EQUIV(previous->value, next->value) &&
+-			EQUIV(previous->control_in_value, 0) &&
+-			EQUIV(next->control_out_value, 0))
++		if(EQUIV(previous->get_value(), next->get_value()) &&
++		   EQUIV(previous->get_control_out_value(), 0) &&
++		   EQUIV(next->get_control_in_value(), 0))
+ 		{
+-			return previous->value;
++			return previous->get_value();
+ 		}
+ 	}
++	
++// at this point: previous and next not NULL, positions differ, value not constant.
++
++	return calculate_bezier(previous, next, position);
++}
+ 
+ 
+-// Interpolate
+-	y0 = previous->value;
+-	y3 = next->value;
++float FloatAutos::calculate_bezier(FloatAuto *previous, FloatAuto *next, int64_t position)
++{
++	if(next->position - previous->position == 0) return previous->get_value();
+ 
+-	if(direction == PLAY_FORWARD)
+-	{
+-		y1 = previous->value + previous->control_out_value * 2;
+-		y2 = next->value + next->control_in_value * 2;
+-		t = (double)(position - previous->position) / 
++	float y0 = previous->get_value();
++	float y3 = next->get_value();
++
++// control points
++	float y1 = previous->get_value() + previous->get_control_out_value();
++	float y2 = next->get_value() + next->get_control_in_value();
++	float t = (float)(position - previous->position) / 
+ 			(next->position - previous->position);
+-// division by 0
+-		if(next->position - previous->position == 0) return previous->value;
+-	}
+-	else
+-	{
+-		y1 = previous->value + previous->control_in_value * 2;
+-		y2 = next->value + next->control_out_value * 2;
+-		t = (double)(previous->position - position) / 
+-			(previous->position - next->position);
+-// division by 0
+-		if(previous->position - next->position == 0) return previous->value;
+-	}
+ 
+  	float tpow2 = t * t;
+ 	float tpow3 = t * t * t;
+@@ -345,82 +320,48 @@ float FloatAutos::get_value(int64_t posi
+ 		+ 3 * t     * invtpow2 * y1
+ 		+ 3 * tpow2 * invt     * y2 
+ 		+     tpow3            * y3);
+-//printf("FloatAutos::get_value %f %f %d %d %d %d\n", result, t, direction, position, previous->position, next->position);
++//printf("FloatAutos::get_value(t=%5.3f)->%6.2f   (prev,pos,next)=(%d,%d,%d)\n", t, result, previous->position, position, next->position);
+ 
+ 	return result;
+-
+-
+-
+-// 	get_fade_automation(slope,
+-// 		intercept,
+-// 		position,
+-// 		slope_len,
+-// 		PLAY_FORWARD);
+-// 
+-// 	return (float)intercept;
+ }
+ 
+ 
+-void FloatAutos::get_fade_automation(double &slope,
+-	double &intercept,
+-	int64_t input_position,
+-	int64_t &slope_len,
+-	int direction)
+-{
+-	Auto *current = 0;
+-	FloatAuto *prev_keyframe = 
+-		(FloatAuto*)get_prev_auto(input_position, direction, current);
+-	FloatAuto *next_keyframe = 
+-		(FloatAuto*)get_next_auto(input_position, direction, current);
+-	int64_t new_slope_len;
+-
+-	if(direction == PLAY_FORWARD)
+-	{
+-		new_slope_len = next_keyframe->position - prev_keyframe->position;
+-
+-//printf("FloatAutos::get_fade_automation %d %d %d\n", 
+-//	prev_keyframe->position, input_position, next_keyframe->position);
+-
+-// Two distinct automation points within range
+-		if(next_keyframe->position > prev_keyframe->position)
+-		{
+-			slope = ((double)next_keyframe->value - prev_keyframe->value) / 
+-				new_slope_len;
+-			intercept = ((double)input_position - prev_keyframe->position) * slope + prev_keyframe->value;
+-
+-			if(next_keyframe->position < input_position + new_slope_len)
+-				new_slope_len = next_keyframe->position - input_position;
+-			slope_len = MIN(slope_len, new_slope_len);
+-		}
+-		else
+-// One automation point within range
+-		{
+-			slope = 0;
+-			intercept = prev_keyframe->value;
+-		}
+-	}
+-	else
+-	{
+-		new_slope_len = prev_keyframe->position - next_keyframe->position;
+-// Two distinct automation points within range
+-		if(next_keyframe->position < prev_keyframe->position)
+-		{
+-			slope = ((double)next_keyframe->value - prev_keyframe->value) / new_slope_len;
+-			intercept = ((double)prev_keyframe->position - input_position) * slope + prev_keyframe->value;
+-
+-			if(prev_keyframe->position > input_position - new_slope_len)
+-				new_slope_len = input_position - prev_keyframe->position;
+-			slope_len = MIN(slope_len, new_slope_len);
+-		}
++float FloatAutos::calculate_bezier_derivation(FloatAuto *previous, FloatAuto *next, int64_t position)
++// calculate the slope of the interpolating bezier function at given position.
++// computed slope is based on the actual position scale (in frames or samples)
++{
++	float scale = next->position - previous->position;
++	if(scale == 0)
++		if(previous->get_control_out_position() != 0)
++			return previous->get_control_out_value() / previous->get_control_out_position();
+ 		else
+-// One automation point within range
+-		{
+-			slope = 0;
+-			intercept = next_keyframe->value;
+-		}
+-	}
++			return 0;
++	
++	float y0 = previous->get_value();
++	float y3 = next->get_value();
++	
++// control points
++	float y1 = previous->get_value() + previous->get_control_out_value();
++	float y2 = next->get_value() + next->get_control_in_value();
++// normalized scale	
++	float t = (float)(position - previous->position) / scale; 
++	
++ 	float tpow2 = t * t;
++	float invt = 1 - t;
++	float invtpow2 = invt * invt;
++	
++	float slope = 3 * (
++		- invtpow2              * y0
++		- invt * ( 2*t - invt ) * y1
++		+ t    * ( 2*invt - t ) * y2 
++		+ tpow2                 * y3
++		);
++	
++	return slope / scale;
+ }
+ 
++
++
+ void FloatAutos::get_extents(float *min, 
+ 	float *max,
+ 	int *coords_undefined,
+@@ -445,12 +386,12 @@ void FloatAutos::get_extents(float *min,
+ 		FloatAuto *current = (FloatAuto*)default_auto;
+ 		if(*coords_undefined)
+ 		{
+-			*min = *max = current->value;
++			*min = *max = current->get_value();
+ 			*coords_undefined = 0;
+ 		}
+ 
+-		*min = MIN(current->value, *min);
+-		*max = MAX(current->value, *max);
++		*min = MIN(current->get_value(), *min);
++		*max = MAX(current->get_value(), *max);
+ 	}
+ 
+ // Test all handles
+@@ -460,17 +401,17 @@ void FloatAutos::get_extents(float *min,
+ 		{
+ 			if(*coords_undefined)
+ 			{
+-				*min = *max = current->value;
++				*min = *max = current->get_value();
+ 				*coords_undefined = 0;
+ 			}
+ 			
+-			*min = MIN(current->value, *min);
+-			*min = MIN(current->value + current->control_in_value, *min);
+-			*min = MIN(current->value + current->control_out_value, *min);
+-
+-			*max = MAX(current->value, *max);
+-			*max = MAX(current->value + current->control_in_value, *max);
+-			*max = MAX(current->value + current->control_out_value, *max);
++			*min = MIN(current->get_value(), *min);
++			*min = MIN(current->get_value() + current->get_control_in_value(), *min);
++			*min = MIN(current->get_value() + current->get_control_out_value(), *min);
++
++			*max = MAX(current->get_value(), *max);
++			*max = MAX(current->get_value() + current->get_control_in_value(), *max);
++			*max = MAX(current->get_value() + current->get_control_out_value(), *max);
+ 		}
+ 	}
+ 
+@@ -487,10 +428,7 @@ void FloatAutos::get_extents(float *min,
+ 		position < unit_end; 
+ 		position += unit_step)
+ 	{
+-		float value = get_value(position,
+-			PLAY_FORWARD,
+-			prev,
+-			next);
++		float value = get_value(position,prev,next);
+ 		if(*coords_undefined)
+ 		{
+ 			*min = *max = value;
+@@ -509,15 +447,16 @@ void FloatAutos::dump()
+ 	printf("	FloatAutos::dump %p\n", this);
+ 	printf("	Default: position %lld value=%f\n", 
+ 		default_auto->position, 
+-		((FloatAuto*)default_auto)->value);
++		((FloatAuto*)default_auto)->get_value());
+ 	for(Auto* current = first; current; current = NEXT)
+ 	{
+-		printf("	position %lld value=%f invalue=%f outvalue=%f inposition=%lld outposition=%lld\n", 
++		printf("	position %lld value=%7.3f invalue=%7.3f outvalue=%7.3f %s\n", 
+ 			current->position, 
+-			((FloatAuto*)current)->value,
+-			((FloatAuto*)current)->control_in_value,
+-			((FloatAuto*)current)->control_out_value,
+-			((FloatAuto*)current)->control_in_position,
+-			((FloatAuto*)current)->control_out_position);
++			((FloatAuto*)current)->get_value(),
++			((FloatAuto*)current)->get_control_in_value(),
++			((FloatAuto*)current)->get_control_out_value(),
++			((FloatAuto*)current)->tangent_mode == FloatAuto::SMOOTH ? "smooth" :
++			((FloatAuto*)current)->tangent_mode == FloatAuto::LINEAR ? "linear" : ""
++			);
+ 	}
+ }
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/floatautos.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/floatautos.h
+@@ -50,14 +50,11 @@ public:
+ // Get value at a specific point.  This needs previous and next stores
+ // because it is used for every pixel in the drawing function.
+ 	float get_value(int64_t position, 
+-		int direction,
+ 		FloatAuto* &previous,
+ 		FloatAuto* &next);
+-	void get_fade_automation(double &slope,
+-		double &intercept,
+-		int64_t input_position,
+-		int64_t &slope_len,
+-		int direction);
++// Helper: just calc the bezier function without doing any lookup of nodes
++ 	static float calculate_bezier(FloatAuto *previous, FloatAuto *next, int64_t position);
++ 	static float calculate_bezier_derivation(FloatAuto *previous, FloatAuto *next, int64_t position);
+ 	void get_extents(float *min, 
+ 		float *max,
+ 		int *coords_undefined,
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/intauto.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/intauto.C
+@@ -84,12 +84,6 @@ void IntAuto::copy_from(IntAuto *that)
+ 	this->value = that->value;
+ }
+ 
+-float IntAuto::value_to_percentage()
+-{
+-// Only used for toggles so this should work.
+-	return (float)value;
+-}
+-
+ int IntAuto::percentage_to_value(float percentage)
+ {
+ 	return percentage > .5;
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/intauto.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/intauto.h
+@@ -42,7 +42,6 @@ public:
+ 	int identical(IntAuto *that);
+ 	void load(FileXML *file);
+ 	void copy(int64_t start, int64_t end, FileXML *file, int default_only);
+-	float value_to_percentage();
+ 	int percentage_to_value(float percentage);
+ 
+ 	int value;
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/keyframepopup.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/keyframepopup.C
+@@ -39,7 +39,8 @@
+ #include "bcwindowbase.h"
+ #include "filexml.h"
+ #include "edlsession.h"
+-#include "autoconf.h"
++#include "autos.h"
++//include "autoconf.h"
+ 
+ KeyframePopup::KeyframePopup(MWindow *mwindow, MWindowGUI *gui)
+  : BC_PopupMenu(0, 
+@@ -53,17 +54,33 @@ KeyframePopup::KeyframePopup(MWindow *mw
+ 	key_show = 0;
+ 	key_delete = 0;
+ 	key_copy = 0;
++	tan_smooth=tan_linear=tan_free = 0;
++	tangent_mode_displayed = false;
+ }
+ 
+ KeyframePopup::~KeyframePopup()
+ {
+-}
++	if(!tangent_mode_displayed)
++	{
++		delete tan_smooth;
++		delete tan_linear;
++		delete tan_free_t;
++		delete tan_free  ;
++		delete __hline__ ;
++	}
++}	// if they are currently displayed, the menu class will delete them automatically
+ 
+ void KeyframePopup::create_objects()
+ {
+-//	add_item(key_show = new KeyframePopupShow(mwindow, this));
++	add_item(key_show = new KeyframePopupShow(mwindow, this));
+ 	add_item(key_delete = new KeyframePopupDelete(mwindow, this));
+ 	add_item(key_copy = new KeyframePopupCopy(mwindow, this));
++	
++    __hline__  = new BC_MenuItem("-");
++    tan_smooth = new KeyframePopupTangentMode(mwindow, this, FloatAuto::SMOOTH);
++    tan_linear = new KeyframePopupTangentMode(mwindow, this, FloatAuto::LINEAR);
++    tan_free_t = new KeyframePopupTangentMode(mwindow, this, FloatAuto::TFREE );
++    tan_free   = new KeyframePopupTangentMode(mwindow, this, FloatAuto::FREE  );
+ }
+ 
+ int KeyframePopup::update(Plugin *plugin, KeyFrame *keyframe)
+@@ -72,6 +89,7 @@ int KeyframePopup::update(Plugin *plugin
+ 	this->keyframe_auto = keyframe;
+ 	this->keyframe_autos = 0;
+ 	this->keyframe_automation = 0;
++	handle_tangent_mode(0, 0);
+ 	return 0;
+ }
+ 
+@@ -81,6 +99,7 @@ int KeyframePopup::update(Automation *au
+ 	this->keyframe_automation = automation;
+ 	this->keyframe_autos = autos;
+ 	this->keyframe_auto = auto_keyframe;
++	handle_tangent_mode(autos, auto_keyframe);
+ 
+ 	/* snap to cursor */
+ 	double current_position = mwindow->edl->local_session->get_selectionstart(1);
+@@ -98,6 +117,37 @@ int KeyframePopup::update(Automation *au
+ 	return 0;
+ }
+ 
++void KeyframePopup::handle_tangent_mode(Autos *autos, Auto *auto_keyframe)
++// determines the type of automation node. if floatauto, adds
++// menu entries showing the tangent mode of the node
++{
++	if(!tangent_mode_displayed && autos && autos->get_type() == AUTOMATION_TYPE_FLOAT)
++	{ // append additional menu entries showing the tangent-mode
++		add_item(__hline__);
++		add_item(tan_smooth);
++		add_item(tan_linear);
++		add_item(tan_free_t);
++		add_item(tan_free  );
++		tangent_mode_displayed = true;
++	}
++	if(tangent_mode_displayed && (!autos || autos->get_type() != AUTOMATION_TYPE_FLOAT))
++	{ // remove additional menu entries
++		remove_item(tan_free  );
++		remove_item(tan_free_t);
++		remove_item(tan_linear);
++		remove_item(tan_smooth);
++		remove_item(__hline__ );
++		tangent_mode_displayed = false;
++	}
++	if(tangent_mode_displayed && auto_keyframe)
++	{ // set checkmarks to display current mode
++		tan_smooth->toggle_mode((FloatAuto*)auto_keyframe);
++		tan_linear->toggle_mode((FloatAuto*)auto_keyframe);
++		tan_free_t->toggle_mode((FloatAuto*)auto_keyframe);
++		tan_free  ->toggle_mode((FloatAuto*)auto_keyframe);
++	}
++}
++
+ KeyframePopupDelete::KeyframePopupDelete(MWindow *mwindow, KeyframePopup *popup)
+  : BC_MenuItem(_("Delete keyframe"))
+ {
+@@ -355,3 +405,56 @@ int KeyframePopupCopy::handle_event()
+ 
+ 
+ 
++KeyframePopupTangentMode::KeyframePopupTangentMode(
++	MWindow *mwindow, 
++	KeyframePopup *popup, 
++	int tangent_mode)
++ : BC_MenuItem( get_labeltext(tangent_mode))
++{
++    this->tangent_mode = tangent_mode;
++    this->mwindow = mwindow;
++    this->popup = popup;
++}
++
++KeyframePopupTangentMode::~KeyframePopupTangentMode() { }
++
++
++char* KeyframePopupTangentMode::get_labeltext(int mode)
++{
++	switch(mode)
++	{   case FloatAuto::SMOOTH: return _("smooth curve");
++	    case FloatAuto::LINEAR: return _("linear segments");
++	    case FloatAuto::TFREE:  return _("tangent edit");
++	    case FloatAuto::FREE:   return _("disjoint edit");
++	}
++	return "misconfigured";
++}
++
++
++void KeyframePopupTangentMode::toggle_mode(FloatAuto *keyframe)
++{
++	set_checked(tangent_mode == keyframe->tangent_mode);
++}
++
++
++int KeyframePopupTangentMode::handle_event()
++{
++	if (popup->keyframe_autos && 
++	    popup->keyframe_autos->get_type() == AUTOMATION_TYPE_FLOAT)
++	{
++		((FloatAuto*)popup->keyframe_auto)->
++			change_tangent_mode((FloatAuto::t_mode)tangent_mode);
++		
++		// if we switched to some "auto" mode, this may imply a
++		// real change to parameters, so this needs to be undoable...
++		mwindow->save_backup();
++		mwindow->undo->update_undo(_("change keyframe tangent mode"), LOAD_ALL);
++		
++		mwindow->gui->update(0, 1, 0,0,0,0,0); // incremental redraw for canvas
++		mwindow->cwindow->update(0,0, 1, 0,0); // redraw tool window in compositor
++		mwindow->update_plugin_guis();
++		mwindow->restart_brender();
++		mwindow->sync_parameters(CHANGE_EDL);
++	}
++	return 1;
++}
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/keyframepopup.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/keyframepopup.h
+@@ -29,11 +29,13 @@
+ #include "plugindialog.inc"
+ #include "keyframe.inc"
+ #include "automation.h" 
++#include "floatauto.h"
+ 
+ 
+ class KeyframePopupDelete;
+ class KeyframePopupShow;
+ class KeyframePopupCopy;
++class KeyframePopupTangentMode;
+  
+  
+ class KeyframePopup : public BC_PopupMenu
+@@ -54,12 +56,17 @@ public:
+ 	Autos *keyframe_autos;
+ 	Automation *keyframe_automation;
+ 	Auto *keyframe_auto;
+-	
++	bool tangent_mode_displayed;
+ 
+-	
++
++private:	
+ 	KeyframePopupDelete *key_delete;
+ 	KeyframePopupShow *key_show;
+ 	KeyframePopupCopy *key_copy;
++	KeyframePopupTangentMode *tan_smooth, *tan_linear, *tan_free_t, *tan_free;
++	BC_MenuItem * __hline__;
++	
++	void handle_tangent_mode(Autos *autos, Auto *auto_keyframe);
+ };
+ 
+ class KeyframePopupDelete : public BC_MenuItem
+@@ -95,6 +102,21 @@ public:
+ 	KeyframePopup *popup;
+ };
+ 
++class KeyframePopupTangentMode : public BC_MenuItem
++{
++public:
++	KeyframePopupTangentMode(MWindow *mwindow, KeyframePopup *popup, int tangent_mode);
++	~KeyframePopupTangentMode();
++	int handle_event();
+ 
++private:
++	MWindow *mwindow;
++	KeyframePopup *popup;
++	int tangent_mode;
++	char* get_labeltext(int);
++	void toggle_mode(FloatAuto*);
++    
++friend class KeyframePopup;
++};
+ 
+  #endif
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/mainsession.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/mainsession.C
+@@ -60,6 +60,7 @@ MainSession::MainSession(MWindow *mwindo
+ 	gwindow_y = 0;
+ 	show_gwindow = 0;
+ 	current_tip = 0;
++	drag_handle = 0;
+ 	cwindow_fullscreen = 0;
+ 	rwindow_fullscreen = 0;
+ 	vwindow_fullscreen = 0;
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/maskauto.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/maskauto.C
+@@ -277,14 +277,16 @@ void MaskAuto::copy_from(MaskAuto *src)
+ }
+ 
+ 
+-int MaskAuto::interpolate_from(Auto *a1, Auto *a2, int64_t position) {
++int MaskAuto::interpolate_from(Auto *a1, Auto *a2, int64_t position, Auto *templ) {
++	if(!a1) a1 = previous;
++	if(!a2) a2 = next;
+ 	MaskAuto  *mask_auto1 = (MaskAuto *)a1;
+ 	MaskAuto  *mask_auto2 = (MaskAuto *)a2;
+ 
+-	if (!mask_auto2 || mask_auto2->masks.total == 0) // if mask_auto == null, copy from first
++	if (!mask_auto2 || !mask_auto1 || mask_auto2->masks.total == 0) 
++	// can't interpolate, fall back to copying (using template if possible)
+ 	{
+-		copy_from(mask_auto1);
+-		return 0;
++		return Auto::interpolate_from(a1, a2, position, templ);
+ 	}
+ 	this->mode = mask_auto1->mode;
+ 	this->feather = mask_auto1->feather;
+@@ -315,8 +317,8 @@ int MaskAuto::interpolate_from(Auto *a1,
+ 				mask_auto2->position);
+ 			new_submask->points.append(point);
+ 		}
+-
+ 	}
++	return 1;
+ 
+ 
+ }
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/maskauto.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/maskauto.h
+@@ -71,7 +71,7 @@ public:
+ 	void load(FileXML *file);
+ 	void copy(int64_t start, int64_t end, FileXML *file, int default_auto);
+ 	void copy_from(Auto *src);
+-	int interpolate_from(Auto *a1, Auto *a2, int64_t position); 
++	int interpolate_from(Auto *a1, Auto *a2, int64_t position, Auto *templ=0); 
+ 	void copy_from(MaskAuto *src);
+ 
+ 	void dump();
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/patchbay.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/patchbay.C
+@@ -497,15 +497,17 @@ void PatchBay::synchronize_faders(float
+ 
+ 			FloatAuto *keyframe = (FloatAuto*)fade_autos->get_auto_for_editing(position);
+ 
+-			keyframe->value += change;
++			float new_value = keyframe->get_value() + change;
+ 			if(data_type == TRACK_AUDIO)
+-				CLAMP(keyframe->value, 
++				CLAMP(new_value, 
+ 				      mwindow->edl->local_session->automation_mins[AUTOGROUPTYPE_AUDIO_FADE],
+ 				      mwindow->edl->local_session->automation_maxs[AUTOGROUPTYPE_AUDIO_FADE]);
+ 			else
+-				CLAMP(keyframe->value, 
++				CLAMP(new_value, 
+ 				      mwindow->edl->local_session->automation_mins[AUTOGROUPTYPE_VIDEO_FADE],
+ 				      mwindow->edl->local_session->automation_maxs[AUTOGROUPTYPE_VIDEO_FADE]);
++			
++			keyframe->set_value(new_value);
+ 
+ 			PatchGUI *patch = get_patch_of(current);
+ 			if(patch) patch->update(patch->x, patch->y);
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/splashgui.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/splashgui.C
+@@ -64,9 +64,14 @@ void SplashGUI::create_objects()
+ 		0,
+ 		0));
+ 	add_subwindow(operation = 
+-		new BC_Title(5, 
+-			progress->get_y() - get_text_height(MEDIUMFONT) - 5,
+-			_("Loading...")));
++		new BC_Title( // 5
++            (int)(get_w()*0.46), 
++			//progress->get_y() - get_text_height(MEDIUMFONT) - 5,
++            get_h() - get_text_height(MEDIUMFONT) - 60,
++			_("Loading..."),
++            MEDIUMFONT,
++            0x6065C8              // Ichthyostega's private colors
++            ));
+ }
+ 
+ 
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/trackcanvas.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/trackcanvas.C
+@@ -2169,6 +2169,9 @@ int TrackCanvas::do_keyframes(int cursor
+                                 gui->keyframe_menu->activate_menu();
+                                 rerender = 1; // the position changes
+ 							}
++						if(buttonpress == 1 && ctrl_down() &&
++						   AUTOMATION_TYPE_FLOAT == autos->get_type())
++							rerender = 1; // special case: tangent mode changed
+ 					}
+ 				}
+ 			}
+@@ -2256,7 +2259,7 @@ void TrackCanvas::draw_auto(Auto *curren
+ 	draw_box(x1, y1, x2 - x1, y2 - y1);
+ }
+ 
+-void TrackCanvas::draw_floatauto(Auto *current, 
++void TrackCanvas::draw_floatauto(FloatAuto *current, 
+ 	int x, 
+ 	int y, 
+ 	int in_x, 
+@@ -2268,8 +2271,6 @@ void TrackCanvas::draw_floatauto(Auto *c
+ 	int color)
+ {
+ 	int x1, y1, x2, y2;
+-	int in_x1, in_y1, in_x2, in_y2;
+-	int out_x1, out_y1, out_x2, out_y2;
+ 	char string[BCTEXTLEN];
+ 
+ // Center
+@@ -2289,45 +2290,75 @@ void TrackCanvas::draw_floatauto(Auto *c
+ 		draw_box(x1, y1, x2 - x1, y2 - y1);
+ 	}
+ 
+-// In handle
+-	in_x1 = in_x - HANDLE_W / 2;
+-	in_x2 = in_x + HANDLE_W / 2;
+-	in_y1 = center_pixel + in_y - HANDLE_W / 2;
+-	in_y2 = center_pixel + in_y + HANDLE_W / 2;
+-
+-	CLAMP(in_y1, center_pixel + -zoom_track / 2, center_pixel + zoom_track / 2);
+-	CLAMP(in_y2, center_pixel + -zoom_track / 2, center_pixel + zoom_track / 2);
+-	CLAMP(in_y, -zoom_track / 2, zoom_track / 2);
+-
+-	if(in_y2 > in_y1)
+-	{
+-		set_color(BLACK);
+-		draw_line(x + 1, center_pixel + y + 1, in_x + 1, center_pixel + in_y + 1);
+-		draw_box(in_x1 + 1, in_y1 + 1, in_x2 - in_x1, in_y2 - in_y1);
+-		set_color(color);
+-		draw_line(x, center_pixel + y, in_x, center_pixel + in_y);
+-		draw_box(in_x1, in_y1, in_x2 - in_x1, in_y2 - in_y1);
+-	}
+-
+-
+-// Out handle
+-	out_x1 = out_x - HANDLE_W / 2;
+-	out_x2 = out_x + HANDLE_W / 2;
+-	out_y1 = center_pixel + out_y - HANDLE_W / 2;
+-	out_y2 = center_pixel + out_y + HANDLE_W / 2;
++// show bezier control points (only) if this 
++// floatauto doesn't adjust it's tangents automatically
++	if(current->tangent_mode != FloatAuto::FREE &&
++	   current->tangent_mode != FloatAuto::TFREE)
++		return;
++
++	if(in_x != x)
++		draw_floatauto_ctrlpoint(x, y, in_x, in_y, center_pixel, zoom_track, color);
++	if(out_x != x)
++		draw_floatauto_ctrlpoint(x, y, out_x, out_y, center_pixel, zoom_track, color);
++}
++
++inline int quantize(float f) { return (int)floor(f + 0.5); }
++
++inline void TrackCanvas::draw_floatauto_ctrlpoint(
++	int x,
++	int y,
++	int cp_x,
++	int cp_y,
++	int center_pixel,
++	int zoom_track,
++	int color)
++// draw the tangent and a handle for given bézier ctrl point
++{
++	bool handle_visible = (abs(cp_y) <= zoom_track / 2); // abs(cp_y+HANDLE_W/2) would be more precise...
+ 
+-	CLAMP(out_y1, center_pixel + -zoom_track / 2, center_pixel + zoom_track / 2);
+-	CLAMP(out_y2, center_pixel + -zoom_track / 2, center_pixel + zoom_track / 2);
+-	CLAMP(out_y, -zoom_track / 2, zoom_track / 2);
++	float slope = (float)(cp_y - y)/(cp_x - x);
++	CLAMP(cp_y, -zoom_track / 2, zoom_track / 2);
++	if(slope != 0)
++		cp_x = x + quantize((cp_y - y) / slope);
+ 
+-	if(out_y2 > out_y1)
+-	{
++	y    += center_pixel;
++	cp_y += center_pixel;
++	
++	// drawing the tangent as a dashed line...
++	int const dash = 2 * HANDLE_W;
++	int const gap  = HANDLE_W / 2;
++	float sx = cp_x - x;
++	float ex = 0;
++	
++	// q is the x displacement for a unit line of slope
++	float q = 1 / sqrt(1 + slope * slope) * (sx > 0 ? 1 : -1);
++	
++	float dist = 1/q * sx;
++	if(dist > dash)
++		ex = sx - q * dash;
++	
++	set_color(color);
++	do {	
++		float sy = slope * sx;
++		float ey = slope * ex;
++		draw_line(quantize(sx + x),
++			  quantize(sy + y),
++			  quantize(ex + x),
++			  quantize(ey + y));
++		sx = ex - q * gap;
++		ex = sx - q * dash;
++		dist -= dash + gap;
++	} while (dist > 2 * dash);
++
++	if(handle_visible)
++	{
++		int r = HANDLE_W / 2;
++		int cp_x1 = cp_x - r;
++		int cp_y1 = cp_y - r;
+ 		set_color(BLACK);
+-		draw_line(x + 1, center_pixel + y + 1, out_x + 1, center_pixel + out_y + 1);
+-		draw_box(out_x1 + 1, out_y1 + 1, out_x2 - out_x1, out_y2 - out_y1);
++		draw_disc  (cp_x1, cp_y1, 2 * r, 2 * r);
+ 		set_color(color);
+-		draw_line(x, center_pixel + y, out_x, center_pixel + out_y);
+-		draw_box(out_x1, out_y1, out_x2 - out_x1, out_y2 - out_y1);
++		draw_circle(cp_x1, cp_y1, 2 * r, 2 * r);
+ 	}
+ }
+ 
+@@ -2357,7 +2388,9 @@ int TrackCanvas::test_auto(Auto *current
+ 		if(buttonpress && buttonpress != 3)
+ 		{
+ 			mwindow->session->drag_auto = current;
+-			mwindow->session->drag_start_percentage = current->value_to_percentage();
++			mwindow->session->drag_start_percentage = (float)((IntAuto*)current)->value;
++			// Toggle Autos don't respond to vertical zoom, they always show up
++			// with "on" == 100% == line on top
+ 			mwindow->session->drag_start_position = current->position;
+ 			mwindow->session->drag_origin_x = cursor_x;
+ 			mwindow->session->drag_origin_y = cursor_y;
+@@ -2368,7 +2401,76 @@ int TrackCanvas::test_auto(Auto *current
+ 	return result;
+ }
+ 
+-int TrackCanvas::test_floatauto(Auto *current, 
++
++
++// some Helpers for test_floatauto(..)
++// and for dragging the tangents/ctrl points
++inline 
++float test_tangent_line( 
++	int x0, 
++	int y0, 
++	int ctrl_x,
++	int ctrl_y,
++	float cursor_x, 
++	float cursor_y)
++{
++	// Control point switched off?
++	if(x0 == ctrl_x)
++		return 0.0;
++	
++	ctrl_x -= x0;
++	ctrl_y -= y0;
++	cursor_x -= x0; 
++	cursor_y -= y0;
++	
++	float q;
++	float deltaX, deltaY;
++	q = (0==ctrl_y)?  0 :
++	    cursor_y / ctrl_y;
++	deltaX = q * ctrl_x - cursor_x;
++	q = cursor_x / ctrl_x;
++	deltaY = q * ctrl_y - cursor_y;
++	
++	float distance;
++	if(0 == deltaX * deltaY) 
++		distance = 0.0;
++	else
++		distance = fabs(deltaX*deltaY / sqrt(deltaX*deltaX + deltaY*deltaY));
++	
++	if(distance > HANDLE_W / 4) 
++		return 0.0;
++	else
++		return q;
++}
++
++
++inline 
++float levered_position(float position, float ref_pos)
++{
++	if( 1e-6 > fabs(ref_pos) || isnan(ref_pos)) 
++		return 0.0;
++	else 
++		return ref_pos / position;
++}
++
++
++float TrackCanvas::value_to_percentage(float auto_value, int autogrouptype)
++// transforms automation value into current display coords,
++// dependant on current automation display range for the given kind of automation
++{
++	if(!mwindow || !mwindow->edl) return 0;
++	float automation_min = mwindow->edl->local_session->automation_mins[autogrouptype];
++	float automation_max = mwindow->edl->local_session->automation_maxs[autogrouptype];
++	float automation_range = automation_max - automation_min;
++	if(0 == automation_range || isnan(auto_value) || isinf(auto_value))
++		return 0;
++	else
++		return (auto_value - automation_min) / automation_range;
++}
++
++
++
++int TrackCanvas::test_floatauto(FloatAuto *current, 
+ 	int x, 
+ 	int y, 
+ 	int in_x,
+@@ -2379,7 +2481,8 @@ int TrackCanvas::test_floatauto(Auto *cu
+ 	int zoom_track, 
+ 	int cursor_x, 
+ 	int cursor_y, 
+-	int buttonpress)
++	int buttonpress,
++	int autogrouptype)
+ {
+ 	int x1, y1, x2, y2;
+ 	int in_x1, in_y1, in_x2, in_y2;
+@@ -2414,67 +2517,98 @@ int TrackCanvas::test_floatauto(Auto *cu
+ 
+ 
+ //printf("TrackCanvas::test_floatauto %d %d %d %d %d %d\n", cursor_x, cursor_y, x1, x2, y1, y2);
+-// Test value
+-	if(!ctrl_down() &&
+-		cursor_x >= x1 && 
+-		cursor_x < x2 && 
+-		cursor_y >= y1 && 
+-		cursor_y < y2)
++// buttonpress could be the start of a drag operation
++#define INIT_DRAG(POS,VAL) \
++		mwindow->session->drag_auto = current;      \
++		mwindow->session->drag_origin_x = cursor_x;  \
++		mwindow->session->drag_origin_y = cursor_y;   \
++		mwindow->session->drag_start_position = (POS); \
++		mwindow->session->drag_start_percentage = (VAL);
++
++#define WITHIN(X1,X2,Y1,Y2) (cursor_x >=(X1) && cursor_x <(X2) && cursor_y >=(Y1) && cursor_y <(Y2) )
++
++
++// without modifier we are manipulating the automation node
++// with ALT it's about dragging only the value of the node
++// with SHIFT the value snaps to the value of neighbouring nodes
++// CTRL indicates we are rather manipulating the tangent(s) of the node
++
++	if(!ctrl_down())
+ 	{
+-		if(buttonpress && (buttonpress != 3))
+-		{
+-			mwindow->session->drag_auto = current;
+-			mwindow->session->drag_start_percentage = current->value_to_percentage();
+-			mwindow->session->drag_start_position = current->position;
+-			mwindow->session->drag_origin_x = cursor_x;
+-			mwindow->session->drag_origin_y = cursor_y;
+-			mwindow->session->drag_handle = 0;
+-		}
+-		result = 1;
++		if( WITHIN(x1,x2,y1,y2))
++		{	// cursor hits node
++			result = 1;
++			
++			if(buttonpress && (buttonpress != 3))
++			{
++				INIT_DRAG(current->position, value_to_percentage(current->get_value(), autogrouptype))
++				mwindow->session->drag_handle = 0;
++		}	}
+ 	}
+-	else
+-// Test in control
+-	if(ctrl_down() &&
+-		cursor_x >= in_x1 && 
+-		cursor_x < in_x2 && 
+-		cursor_y >= in_y1 && 
+-		cursor_y < in_y2 &&
+-		current->position > 0)
+-	{
+-		if(buttonpress && (buttonpress != 3))
++	else // ctrl_down()
+ 		{
+-			mwindow->session->drag_auto = current;
+-			mwindow->session->drag_start_percentage = 
+-				current->invalue_to_percentage();
+-			mwindow->session->drag_start_position = 
+-				((FloatAuto*)current)->control_in_position;
+-			mwindow->session->drag_origin_x = cursor_x;
+-			mwindow->session->drag_origin_y = cursor_y;
+-			mwindow->session->drag_handle = 1;
+-		}
+-		result = 1;
+-	}
+-	else
++			if( WITHIN(x1,x2,y1,y2))
++			{
++				result = 1;
++				if(buttonpress && (buttonpress != 3))
++				{
++					// could be ctrl-click or ctrl-drag
++					// click would cycle through tangent modes
++					((FloatAuto*)current)->toggle_tangent_mode();
++					
++					// drag will start dragging the tangent, if applicable
++					INIT_DRAG(current->position, value_to_percentage(current->get_value(), autogrouptype))
++					mwindow->session->drag_handle = 0;
++			}	}
++			
++			float lever = 0.0; // we use the tangent as a draggable lever. 1.0 is at the ctrl point
++
++// Test in control
++			if(in_x != x && current->position > 0 &&
++				(FloatAuto::FREE == current->tangent_mode ||
++				 FloatAuto::TFREE == current->tangent_mode))
++// act on in control handle only if
++// tangent is significant and is editable (not automatically choosen)
++			{
++				lever = test_tangent_line(x, y, in_x, in_y, cursor_x, cursor_y-center_pixel);
++				if(WITHIN(in_x1,in_x2,in_y1,in_y2) ||  // either cursor at ctrl-point handle
++				   lever > 0.0)                        // or cursor on tangent line
++				{
++					result = 1;
++					if(buttonpress && (buttonpress != 3))
++					{
++						if(lever == 0.0) lever=1.0; // we entered by dragging the handle...
++						mwindow->session->drag_handle = 1;
++						float new_invalue = current->get_value() + lever * current->get_control_in_value();
++						INIT_DRAG(current->position + (int64_t)(lever * current->get_control_in_position()),
++						          value_to_percentage(new_invalue, autogrouptype))
++				}	}
++			}
++
+ // Test out control
+-	if(ctrl_down() &&
+-		cursor_x >= out_x1 && 
+-		cursor_x < out_x2 && 
+-		cursor_y >= out_y1 && 
+-		cursor_y < out_y2)
+-	{
+-		if(buttonpress && (buttonpress != 3))
+-		{
+-			mwindow->session->drag_auto = current;
+-			mwindow->session->drag_start_percentage = 
+-				current->outvalue_to_percentage();
+-			mwindow->session->drag_start_position = 
+-				((FloatAuto*)current)->control_out_position;
+-			mwindow->session->drag_origin_x = cursor_x;
+-			mwindow->session->drag_origin_y = cursor_y;
+-			mwindow->session->drag_handle = 2;
+-		}
+-		result = 1;
+-	}
++			if(out_x != x &&
++				(FloatAuto::FREE == current->tangent_mode ||
++				 FloatAuto::TFREE == current->tangent_mode))
++// act on out control only if tangent is significant and is editable
++			{
++				lever = test_tangent_line(x, y, out_x, out_y, cursor_x, cursor_y-center_pixel);
++				if(WITHIN(out_x1,out_x2,out_y1,out_y2) ||
++				   lever > 0.0)
++				{
++					result = 1;
++					if(buttonpress && (buttonpress != 3))
++					{
++						if(lever == 0.0) lever=1.0;
++						mwindow->session->drag_handle = 2;
++						float new_outvalue = current->get_value() + lever * current->get_control_out_value();
++						INIT_DRAG(current->position + (int64_t)(lever * current->get_control_out_position()),
++						          value_to_percentage(new_outvalue, autogrouptype))
++				}	}
++			}
++			
++		} // end ctrl_down()
++#undef WITHIN
++#undef INIT_DRAG
+ 
+ // if(buttonpress) 
+ // printf("TrackCanvas::test_floatauto 2 drag_handle=%d ctrl_down=%d cursor_x=%d cursor_y=%d x1=%d x2=%d y1=%d y2=%d\n", 
+@@ -2522,7 +2656,7 @@ void TrackCanvas::draw_floatline(int cen
+ 	for(int x = x1; x < x2; x++)
+ 	{
+ 		int64_t position = (int64_t)(unit_start + x * zoom_units);
+-		float value = autos->get_value(position, PLAY_FORWARD, previous1, next1);
++		float value = autos->get_value(position, previous1, next1);
+ 		AUTOMATIONCLAMPS(value, autogrouptype);
+ 
+ 		int y = center_pixel + 
+@@ -2533,9 +2667,9 @@ void TrackCanvas::draw_floatline(int cen
+ 			y < center_pixel + yscale / 2 - 1)
+ 		{
+  			set_color(BLACK);
+- 			draw_line(x - 1, prev_y + 1, x, y + 1);
++ 			draw_line(x - 1, prev_y  , x, y   );
+  			set_color(color);
+- 			draw_line(x - 1, prev_y, x, y);
++ 			draw_line(x - 1, prev_y-1, x, y-1 );
+ 		}
+ 		prev_y = y;
+ 	}
+@@ -2548,7 +2682,9 @@ void TrackCanvas::synchronize_autos(floa
+ 	FloatAuto *fauto, 
+ 	int fill_gangs)
+ {
+-// fill mwindow->session->drag_auto_gang
++// Handles the special case of modifying a fadeauto 
++// when there are ganged faders on several tracks
++// (skip and fauto may be NULL if fill_gangs==-1)
+ 	if (fill_gangs == 1 && skip->gang)
+ 	{
+ 		for(Track *current = mwindow->edl->tracks->first;
+@@ -2564,27 +2700,22 @@ void TrackCanvas::synchronize_autos(floa
+ 				double position = skip->from_units(fauto->position);
+ 				FloatAuto *previous = 0, *next = 0;
+ 
+-				float init_value = fade_autos->get_value(fauto->position, PLAY_FORWARD, previous, next);
++				float init_value = fade_autos->get_value(fauto->position, previous, next);
+ 				FloatAuto *keyframe;
+ 				keyframe = (FloatAuto*)fade_autos->get_auto_at_position(position);
+ 				
+ 				if (!keyframe)
+ 				{
+-// create keyframe at exactly this point in time
++// create keyframe on neighbouring track at the point in time given by fauto
+ 					keyframe = (FloatAuto*)fade_autos->insert_auto(fauto->position);
+-					keyframe->value = init_value;
++					keyframe->set_value(init_value + change);
+ 				} 
+ 				else
+ 				{ 
+ // keyframe exists, just change it
+-					keyframe->value += change;		
++					keyframe->adjust_to_new_coordinates(fauto->position, keyframe->get_value() + change);
++// need to (re)set the position, as the existing node could be on a "equivalent" position (within half a frame)
+ 				} 
+-				
+-				keyframe->position = fauto->position;
+-				keyframe->control_out_position = fauto->control_out_position;
+-				keyframe->control_in_position = fauto->control_in_position;
+-				keyframe->control_out_value = fauto->control_out_value;
+-				keyframe->control_in_value = fauto->control_in_value;
+ 
+ 				mwindow->session->drag_auto_gang->append((Auto *)keyframe);
+ 			}
+@@ -2598,15 +2729,11 @@ void TrackCanvas::synchronize_autos(floa
+ 		{
+ 			FloatAuto *keyframe = (FloatAuto *)mwindow->session->drag_auto_gang->values[i];
+ 			
+-			keyframe->value += change;
+-			keyframe->position = fauto->position;
+-			CLAMP(keyframe->value, 
++			float new_value = keyframe->get_value() + change;
++			CLAMP(new_value, 
+ 			      mwindow->edl->local_session->automation_mins[keyframe->autos->autogrouptype],
+ 			      mwindow->edl->local_session->automation_maxs[keyframe->autos->autogrouptype]);
+-			keyframe->control_out_position = fauto->control_out_position;
+-			keyframe->control_in_position = fauto->control_in_position;
+-			keyframe->control_out_value = fauto->control_out_value;
+-			keyframe->control_in_value = fauto->control_in_value;
++			keyframe->adjust_to_new_coordinates(fauto->position, new_value);
+ 		} 
+ 
+ 	} 
+@@ -2646,7 +2773,7 @@ int TrackCanvas::test_floatline(int cent
+ 	int64_t position = (int64_t)(unit_start + cursor_x * zoom_units);
+ // Call by reference fails for some reason here
+ 	FloatAuto *previous = 0, *next = 0;
+-	float value = autos->get_value(position, PLAY_FORWARD, previous, next);
++	float value = autos->get_value(position, previous, next);
+ 	AUTOMATIONCLAMPS(value,autogrouptype);
+ 	int y = center_pixel + 
+ 		(int)(((value - automation_min) / automation_range - 0.5) * -yscale);
+@@ -2666,8 +2793,8 @@ int TrackCanvas::test_floatline(int cent
+ 
+ 			Auto *current;
+ 			current = mwindow->session->drag_auto = autos->insert_auto(position);
+-			((FloatAuto*)current)->value = value;
+-			mwindow->session->drag_start_percentage = current->value_to_percentage();
++			((FloatAuto*)current)->set_value(value);
++			mwindow->session->drag_start_percentage = value_to_percentage(value, autogrouptype);
+ 			mwindow->session->drag_start_position = current->position;
+ 			mwindow->session->drag_origin_x = cursor_x;
+ 			mwindow->session->drag_origin_y = cursor_y;
+@@ -2734,7 +2861,9 @@ int TrackCanvas::test_toggleline(Autos *
+ 
+ 				current = mwindow->session->drag_auto = autos->insert_auto(unit_position);
+ 				((IntAuto*)current)->value = new_value;
+-				mwindow->session->drag_start_percentage = current->value_to_percentage();
++				// Toggle Autos don't respond to vertical zoom, they always show up
++				// with "on" == 100% == line on top
++				mwindow->session->drag_start_percentage = (float)new_value;
+ 				mwindow->session->drag_start_position = current->position;
+ 				mwindow->session->drag_origin_x = cursor_x;
+ 				mwindow->session->drag_origin_y = cursor_y;
+@@ -2797,7 +2926,7 @@ float TrackCanvas::percentage_to_value(f
+ 		if(reference)
+ 		{
+ 			FloatAuto *ptr = (FloatAuto*)reference;
+-			result -= ptr->value;
++			result -= ptr->get_value();
+ 		}
+ 	}
+ 	return result;
+@@ -2821,19 +2950,19 @@ void TrackCanvas::calculate_auto_positio
+ 	float automation_range = automation_max - automation_min;
+ 	FloatAuto *ptr = (FloatAuto*)current;
+ 	*x = (double)(ptr->position - unit_start) / zoom_units;
+-	*y = ((ptr->value - automation_min) /
++	*y = ((ptr->get_value() - automation_min) /
+ 		automation_range - 0.5) * 
+ 		-yscale;
+ 	if(in_x)
+ 	{
+ 		*in_x = (double)(ptr->position + 
+-			ptr->control_in_position - 
++			ptr->get_control_in_position() - 
+ 			unit_start) /
+ 			zoom_units;
+ 	}
+ 	if(in_y)
+ 	{
+-		*in_y = (((ptr->value + ptr->control_in_value) -
++		*in_y = (((ptr->get_value() + ptr->get_control_in_value()) -
+ 			automation_min) /
+ 			automation_range - 0.5) *
+ 			-yscale;
+@@ -2841,13 +2970,13 @@ void TrackCanvas::calculate_auto_positio
+ 	if(out_x)
+ 	{
+ 		*out_x = (double)(ptr->position + 
+-			ptr->control_out_position - 
++			ptr->get_control_out_position() - 
+ 			unit_start) /
+ 			zoom_units;
+ 	}
+ 	if(out_y)
+ 	{
+-		*out_y = (((ptr->value + ptr->control_out_value) -
++		*out_y = (((ptr->get_value() + ptr->get_control_out_value()) -
+ 			automation_min) /
+ 			automation_range - 0.5) *
+ 			-yscale;
+@@ -3004,7 +3133,7 @@ int TrackCanvas::do_float_autos(Track *t
+ 
+ 
+ 
+-// Draw handle
++// Draw or test handle
+ 		if(current && !result)
+ 		{
+ 			if(current != autos->default_auto)
+@@ -3012,7 +3141,7 @@ int TrackCanvas::do_float_autos(Track *t
+ 				if(!draw)
+ 				{
+ 					if(track->record)
+-						result = test_floatauto(current, 
++						result = test_floatauto((FloatAuto*)current, 
+ 							(int)ax2, 
+ 							(int)ay2, 
+ 							(int)in_x2,
+@@ -3023,13 +3152,14 @@ int TrackCanvas::do_float_autos(Track *t
+ 							(int)yscale, 
+ 							cursor_x, 
+ 							cursor_y, 
+-							buttonpress);
++							buttonpress,
++							autogrouptype);
+ 					if (result) 
+ 						auto_instance = current;
+ 				}
+ 				else
+ 				if(draw_auto)
+-					draw_floatauto(current, 
++					draw_floatauto((FloatAuto*)current, 
+ 						(int)ax2, 
+ 						(int)ay2, 
+ 						(int)in_x2,
+@@ -3046,7 +3176,7 @@ int TrackCanvas::do_float_autos(Track *t
+ 
+ 
+ 
+-// Draw joining line
++// Draw or test joining line
+ 		if(!draw)
+ 		{
+ 			if(!result)
+@@ -3680,8 +3810,28 @@ int TrackCanvas::update_drag_floatauto(i
+ 	{
+ // Center
+ 		case 0:
++			if(ctrl_down())
++			// not really editing the node, rather start editing the tangent
++			{
++				if((FloatAuto::FREE == current->tangent_mode || // tangent is editable
++				    FloatAuto::TFREE==current->tangent_mode)
++				   &&                                          
++				     (fabs(x) > HANDLE_W / 2 || fabs(y) > HANDLE_W / 2))
++				                                                // ...and drag movement is significant
++						if(x < 0)
++						{	// drag to the left: 
++							// start editing the invalue (left tangent)
++							mwindow->session->drag_handle=1;
++						}
++						else
++						{
++							mwindow->session->drag_handle=2;
++						}
++				
++				break;
++			}
+ // Snap to nearby values
+-			old_value = current->value;
++			old_value = current->get_value();
+ 			if(shift_down())
+ 			{
+ 				double value1;
+@@ -3693,28 +3843,28 @@ int TrackCanvas::update_drag_floatauto(i
+ 				{
+ 					int autogrouptype = current->previous->autos->autogrouptype;
+ 					value = percentage_to_value(percentage, 0, 0, autogrouptype);
+-					value1 = ((FloatAuto*)current->previous)->value;
++					value1 = ((FloatAuto*)current->previous)->get_value();
+ 					distance1 = fabs(value - value1);
+-					current->value = value1;
++					current->set_value(value1);
+ 				}
+ 
+ 				if(current->next)
+ 				{
+ 					int autogrouptype = current->next->autos->autogrouptype;
+ 					value = percentage_to_value(percentage, 0, 0, autogrouptype);
+-					value2 = ((FloatAuto*)current->next)->value;
++					value2 = ((FloatAuto*)current->next)->get_value();
+ 					distance2 = fabs(value - value2);
+ 					if(!current->previous || distance2 < distance1)
+ 					{
+-						current->value = value2;
++						current->set_value(value2);
+ 					}
+ 				}
+ 
+ 				if(!current->previous && !current->next)
+ 				{
+-					current->value = ((FloatAutos*)current->autos)->default_;
++					current->set_value( ((FloatAutos*)current->autos)->default_);
+ 				}
+-				value = current->value;
++				value = current->get_value();
+ 			}
+ 			else
+ 			{
+@@ -3722,12 +3872,15 @@ int TrackCanvas::update_drag_floatauto(i
+ 				value = percentage_to_value(percentage, 0, 0, autogrouptype);
+ 			}
+ 
++			if(alt_down())
++// ALT constrains movement: fixed position, only changing the value
++				position = mwindow->session->drag_start_position;
++
+ 			if(value != old_value || position != current->position)
+ 			{
+ 				result = 1;
+ 				float change = value - old_value;		
+-				current->value = value;
+-				current->position = position;
++				current->adjust_to_new_coordinates(position, value);
+ 				synchronize_autos(change, current->autos->track, current, 0);
+ 
+ 				char string[BCTEXTLEN], string2[BCTEXTLEN];
+@@ -3737,7 +3890,7 @@ int TrackCanvas::update_drag_floatauto(i
+ 					mwindow->edl->session->sample_rate,
+ 					mwindow->edl->session->frame_rate,
+ 					mwindow->edl->session->frames_per_foot);
+-				sprintf(string, "%s, %.2f", string2, current->value);
++				sprintf(string, "%s, %.2f", string2, current->get_value());
+ 				gui->show_message(string);
+ 			}
+ 			break;
+@@ -3747,23 +3900,26 @@ int TrackCanvas::update_drag_floatauto(i
+ 		{
+ 			int autogrouptype = current->autos->autogrouptype;
+ 			value = percentage_to_value(percentage, 0, current, autogrouptype);
+-			position = MIN(0, position);
+-			if(value != current->control_in_value || 
+-				position != current->control_in_position)
++			if(value != current->get_control_in_value())
+ 			{
+ 				result = 1;
+-				current->control_in_value = value;
+-				current->control_in_position = position;
++				// note: (position,value) need not be at the location of the ctrl point,
++				// but could be somewhere in between on the tangent (or even outward or
++				// on the opposit side). We set the new control point such as
++				// to point the tangent through (position,value)
++				current->set_control_in_value(
++					value * levered_position(position - current->position,
++					                         current->get_control_in_position()));
+ 				synchronize_autos(0, current->autos->track, current, 0);
+ 
+ 				char string[BCTEXTLEN], string2[BCTEXTLEN];
+ 				Units::totext(string2, 
+-					current->autos->track->from_units(current->control_in_position),
++					current->autos->track->from_units(current->get_control_in_position()),
+ 					mwindow->edl->session->time_format,
+ 					mwindow->edl->session->sample_rate,
+ 					mwindow->edl->session->frame_rate,
+ 					mwindow->edl->session->frames_per_foot);
+-				sprintf(string, "%s, %.2f", string2, current->control_in_value);
++				sprintf(string, "%s, %.2f", string2, current->get_control_in_value());
+ 				gui->show_message(string);
+ 			}
+ 		}
+@@ -3774,26 +3930,25 @@ int TrackCanvas::update_drag_floatauto(i
+ 		{
+ 			int autogrouptype = current->autos->autogrouptype;
+ 			value = percentage_to_value(percentage, 0, current, autogrouptype);
+-			position = MAX(0, position);
+-			if(value != current->control_out_value || 
+-				position != current->control_out_position)
++			if(value != current->get_control_out_value())
+ 			{
+ 				result = 1;
+-				current->control_out_value = value;
+-				current->control_out_position = position;
++				current->set_control_out_value(
++					value * levered_position(position - current->position,
++					                         current->get_control_out_position()));
+ 				synchronize_autos(0, current->autos->track, current, 0);
+ 
+ 				char string[BCTEXTLEN], string2[BCTEXTLEN];
+ 				Units::totext(string2, 
+ 					current->autos->track->from_units(
+-						((FloatAuto*)current)->control_out_position),
++						((FloatAuto*)current)->get_control_out_position()),
+ 					mwindow->edl->session->time_format,
+ 					mwindow->edl->session->sample_rate,
+ 					mwindow->edl->session->frame_rate,
+ 					mwindow->edl->session->frames_per_foot);
+ 				sprintf(string, "%s, %.2f", 
+ 					string2, 
+-					((FloatAuto*)current)->control_out_value);
++					((FloatAuto*)current)->get_control_out_value());
+ 				gui->show_message(string);
+ 			}
+ 		}
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/trackcanvas.h
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/trackcanvas.h
+@@ -30,6 +30,7 @@
+ #include "edithandles.inc"
+ #include "floatauto.inc"
+ #include "floatautos.inc"
++#include "intauto.inc"
+ #include "guicast.h"
+ #include "keyframe.inc"
+ #include "mwindow.inc"
+@@ -42,7 +43,6 @@
+ #include "tracks.inc"
+ #include "transitionhandles.inc"
+ #include "keyframe.inc"
+-#include "floatauto.inc"
+ 
+ class TrackCanvas : public BC_SubWindow
+ {
+@@ -92,7 +92,7 @@ public:
+ 		int center_pixel, 
+ 		int zoom_track,
+ 		int color);
+-	void draw_floatauto(Auto *current, 
++	void draw_floatauto(FloatAuto *current, 
+ 		int x, 
+ 		int y, 
+ 		int in_x,
+@@ -110,7 +110,7 @@ public:
+ 		int cursor_x, 
+ 		int cursor_y, 
+ 		int buttonpress);
+-	int test_floatauto(Auto *current, 
++	int test_floatauto(FloatAuto *current, 
+ 		int x, 
+ 		int y, 
+ 		int in_x,
+@@ -121,7 +121,8 @@ public:
+ 		int zoom_track, 
+ 		int cursor_x, 
+ 		int cursor_y, 
+-		int buttonpress);
++		int buttonpress,
++		int autogrouptype);
+ 	void draw_floatline(int center_pixel, 
+ 		FloatAuto *previous,
+ 		FloatAuto *current,
+@@ -387,6 +388,19 @@ public:
+ 
+ 
+ private:
++	void draw_floatauto_ctrlpoint(
++	int x,
++	int y,
++	int cp_x,
++	int cp_y,
++	int center_pixel,
++	int zoom_track,
++	int color);
++
++	float value_to_percentage(float auto_value, int autogrouptype);
++	// transforms automation value into current display coords
++	// dependant on current automation display range for given kind of automation
++
+ 	int end_translation();
+ 
+ // ====================================== cursor selection type
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/vautomation.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/vautomation.C
+@@ -120,20 +120,18 @@ int VAutomation::direct_copy_possible(in
+ // Projector must be centered.
+ 	FloatAuto *previous = 0, *next = 0;
+ 	float z = ((FloatAutos*)autos[AUTOMATION_PROJECTOR_Z])->get_value(
+-		start, direction, previous, next);
++		start, previous, next);
+ 	if(!EQUIV(z, 1)) return 0;
+ 
+ 	previous = 0;
+ 	next = 0;
+ 	float x = ((FloatAutos*)autos[AUTOMATION_PROJECTOR_X])->get_value(start,
+-				direction,
+ 				previous, 
+ 				next);
+ 	if(!EQUIV(x, 0)) return 0;
+ 	previous = 0;
+ 	next = 0;
+ 	float y = ((FloatAutos*)autos[AUTOMATION_PROJECTOR_Y])->get_value(start,
+-				direction,
+ 				previous, 
+ 				next);
+ 	if(!EQUIV(y, 0)) return 0;
+@@ -146,7 +144,6 @@ int VAutomation::direct_copy_possible(in
+ 	next = 0;
+ 	z = ((FloatAutos*)autos[AUTOMATION_CAMERA_Z])->get_value(
+ 		start, 
+-		direction, 
+ 		previous, 
+ 		next);
+ 	if(!EQUIV(z, 1)) return 0;
+@@ -156,7 +153,6 @@ int VAutomation::direct_copy_possible(in
+ 	previous = 0;
+ 	next = 0;
+ 	x = ((FloatAutos*)autos[AUTOMATION_CAMERA_X])->get_value(start,
+-				direction,
+ 				previous, 
+ 				next);
+ 	if(!EQUIV(x, 0)) return 0;
+@@ -164,7 +160,6 @@ int VAutomation::direct_copy_possible(in
+ 	previous = 0;
+ 	next = 0;
+ 	y = ((FloatAutos*)autos[AUTOMATION_CAMERA_Y])->get_value(start,
+-				direction,
+ 				previous, 
+ 				next);
+ 
+@@ -187,19 +182,16 @@ void VAutomation::get_projector(float *x
+ 	before = 0;
+ 	after = 0;
+ 	*x = ((FloatAutos*)autos[AUTOMATION_PROJECTOR_X])->get_value(position,
+-		direction,
+ 		before,
+ 		after);
+ 	before = 0;
+ 	after = 0;
+ 	*y = ((FloatAutos*)autos[AUTOMATION_PROJECTOR_Y])->get_value(position,
+-		direction,
+ 		before,
+ 		after);
+ 	before = 0;
+ 	after = 0;
+ 	*z = ((FloatAutos*)autos[AUTOMATION_PROJECTOR_Z])->get_value(position,
+-		direction,
+ 		before,
+ 		after);
+ }
+@@ -215,19 +207,16 @@ void VAutomation::get_camera(float *x,
+ 	before = 0;
+ 	after = 0;
+ 	*x = ((FloatAutos*)autos[AUTOMATION_CAMERA_X])->get_value(position,
+-		direction,
+ 		before,
+ 		after);
+ 	before = 0;
+ 	after = 0;
+ 	*y = ((FloatAutos*)autos[AUTOMATION_CAMERA_Y])->get_value(position,
+-		direction,
+ 		before,
+ 		after);
+ 	before = 0;
+ 	after = 0;
+ 	*z = ((FloatAutos*)autos[AUTOMATION_CAMERA_Z])->get_value(position,
+-		direction,
+ 		before,
+ 		after);
+ }
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/virtualanode.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/virtualanode.C
+@@ -406,7 +406,6 @@ int VirtualANode::render_fade(double *bu
+ 				sample_rate;
+ 
+ 			fade_value = ((FloatAutos*)autos)->get_value(input_position_project, 
+-				direction,
+ 				previous,
+ 				next);
+ 
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/virtualvnode.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/virtualvnode.C
+@@ -339,7 +339,6 @@ int VirtualVNode::render_fade(VFrame *ou
+ 		printf("  VirtualVNode::render_fade title=%s\n", track->title);
+ 
+ 	intercept = ((FloatAutos*)autos)->get_value(start_position_project, 
+-		direction,
+ 		previous,
+ 		next);
+ 
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/vpatchgui.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/vpatchgui.C
+@@ -109,7 +109,6 @@ int VPatchGUI::update(int x, int y)
+ 			unit_position = vtrack->to_units(unit_position, 0);
+ 			int value = (int)((FloatAutos*)vtrack->automation->autos[AUTOMATION_FADE])->get_value(
+ 				(int64_t)unit_position,
+-				PLAY_FORWARD, 
+ 				previous, 
+ 				next);
+ 			fade->update(fade->get_w(),
+@@ -190,7 +189,7 @@ VFadePatch::VFadePatch(MWindow *mwindow,
+ 			w, 
+ 			mwindow->edl->local_session->automation_mins[AUTOGROUPTYPE_VIDEO_FADE],
+ 			mwindow->edl->local_session->automation_maxs[AUTOGROUPTYPE_VIDEO_FADE], 
+-			(int64_t)get_keyframe(mwindow, patch)->value)
++			(int64_t)get_keyframe(mwindow, patch)->get_value())
+ {
+ 	this->mwindow = mwindow;
+ 	this->patch = patch;
+@@ -206,8 +205,8 @@ float VFadePatch::update_edl()
+ 
+ 	current = (FloatAuto*)fade_autos->get_auto_for_editing(position);
+ 
+-	float result = get_value() - current->value;
+-	current->value = get_value();
++	float result = get_value() - current->get_value();
++	current->set_value(get_value());
+ 
+ 	mwindow->undo->update_undo(_("fade"), LOAD_AUTOMATION, need_undo ? 0 : this);
+ 
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/vtrack.C
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/vtrack.C
+@@ -527,6 +527,13 @@ int VTrack::get_projection(float &in_x1,
+ }
+ 
+ 
++
++inline void addto_value(FloatAuto *fauto, float offset)
++{
++	fauto->set_value(fauto->get_value() + offset);
++}
++
++
+ void VTrack::translate(float offset_x, float offset_y, int do_camera)
+ {
+ 	int subscript;
+@@ -536,22 +543,22 @@ void VTrack::translate(float offset_x, f
+ 		subscript = AUTOMATION_PROJECTOR_X;
+ 	
+ // Translate default keyframe
+-	((FloatAuto*)automation->autos[subscript]->default_auto)->value += offset_x;
+-	((FloatAuto*)automation->autos[subscript + 1]->default_auto)->value += offset_y;
++	addto_value((FloatAuto*)automation->autos[subscript], offset_x);
++	addto_value((FloatAuto*)automation->autos[subscript + 1], offset_y);
+ 
+ // Translate everyone else
+ 	for(Auto *current = automation->autos[subscript]->first; 
+ 		current; 
+ 		current = NEXT)
+ 	{
+-		((FloatAuto*)current)->value += offset_x;
++		addto_value((FloatAuto*)current, offset_x);
+ 	}
+ 
+ 	for(Auto *current = automation->autos[subscript + 1]->first; 
+ 		current; 
+ 		current = NEXT)
+ 	{
+-		((FloatAuto*)current)->value += offset_y;
++		addto_value((FloatAuto*)current, offset_y);
+ 	}
+ }
+ 
+--- cinelerra-cv-2.1.5.hiv20110722.orig/plugins/defaulttheme/defaulttheme.C
++++ cinelerra-cv-2.1.5.hiv20110722/plugins/defaulttheme/defaulttheme.C
+@@ -651,6 +651,9 @@ void BlondTheme::initialize()
+ 	new_toggle("titlesafe.png", cpanel_up, cpanel_hi, cpanel_checked, cpanel_dn, cpanel_checkedhi, "titlesafe");
+ 	new_toggle("toolwindow.png", cpanel_up, cpanel_hi, cpanel_checked, cpanel_dn, cpanel_checkedhi, "tool");
+ 
++	// toggle for tangent mode (compositor/tool window)
++	new_toggle("tan_smooth.png", editpanel_up, editpanel_hi, editpanel_checked, editpanel_dn, editpanel_checkedhi, "tan_smooth");
++	new_toggle("tan_linear.png", editpanel_up, editpanel_hi, editpanel_checked, editpanel_dn, editpanel_checkedhi, "tan_linear");
+ 
+ 
+ 	flush_images();
+--- cinelerra-cv-2.1.5.hiv20110722.orig/plugins/defaulttheme/data/Makefile.am
++++ cinelerra-cv-2.1.5.hiv20110722/plugins/defaulttheme/data/Makefile.am
+@@ -256,6 +256,8 @@ statusbar_left.png \
+ statusbar_right.png \
+ stop.png \
+ swap_extents.png \
++tan_smooth.png \
++tan_linear.png \
+ text.png \
+ timebar_bg.png \
+ timebar_brender.png \
+--- cinelerra-cv-2.1.5.hiv20110722.orig/plugins/suv/suv.C
++++ cinelerra-cv-2.1.5.hiv20110722/plugins/suv/suv.C
+@@ -632,6 +632,9 @@ void SUV::initialize()
+ 	new_toggle("titlesafe.png", cpanel_up, cpanel_hi, cpanel_checked, cpanel_dn, cpanel_checkedhi, "titlesafe");
+ 	new_toggle("toolwindow.png", cpanel_up, cpanel_hi, cpanel_checked, cpanel_dn, cpanel_checkedhi, "tool");
+ 
++	// toggle for tangent mode (compositor/tool window)
++	new_toggle("tan_smooth.png", editpanel_up, editpanel_hi, editpanel_checked, editpanel_dn, editpanel_checkedhi, "tan_smooth");
++	new_toggle("tan_linear.png", editpanel_up, editpanel_hi, editpanel_checked, editpanel_dn, editpanel_checkedhi, "tan_linear");
+ 
+ 
+ 	flush_images();
+--- cinelerra-cv-2.1.5.hiv20110722.orig/plugins/suv/data/Makefile.am
++++ cinelerra-cv-2.1.5.hiv20110722/plugins/suv/data/Makefile.am
+@@ -503,6 +503,8 @@ PNGS = \
+ 	statusbar_cancel_up.png \
+ 	stop.png \
+ 	swap_extents.png \
++	tan_smooth.png \
++	tan_linear.png \
+ 	text.png \
+ 	text_highlight.png \
+ 	timebar_bg.png \
+
