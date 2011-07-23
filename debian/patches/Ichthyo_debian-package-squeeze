@@ -1,0 +1,77 @@
+Ichthyostega's Custom Cinelerra package
+---------------------------------------
+
+Some adjustments to the Cinelerra Buildsystem
+Required to build this package on Debian/Squeeze
+
+- Fix for linking cinelerra when lib MP3 Lame is present
+- linking *statically* against the *internal ffmpeg*
+
+Rationale: currently development for FFmpeg is quite in flux
+and new versions are picked up quickly, while not being API compatible.
+Unfortunately there is no reliable maintainer for Cinelerra, thus I
+prefer linking the internal FFmpeg statically, so Cinelerra doesn't
+depend on the FFmpeg or libAV Version installed on the system
+
+===========================================================================
+--- cinelerra-cv-2.1.5.hiv20110722.orig/configure.in
++++ cinelerra-cv-2.1.5.hiv20110722/configure.in
+@@ -382,7 +382,7 @@ if test "x$with_external_ffmpeg" = "xyes
+ 	echo Using external ffmpeg - no configuration needed
+ else
+ 	ff_conf_args="--disable-ffmpeg --disable-ffserver --disable-ffplay \
+-		--disable-static --enable-shared --build-suffix=-cinelerra"
++		--enable-static --disable-shared --build-suffix=-cinelerra"
+ 
+ 	if test "x$enable_mmx" = "xno"; then
+ 		ff_conf_args="$ff_conf_args --disable-mmx"
+@@ -394,8 +394,6 @@ else
+ 	fi
+ 
+ 
+-	srcdir_c=$(readlink -f $srcdir) &&
+-	mkdir -p quicktime/ffmpeg/ &&
+ 	(
+ 	cd quicktime/ffmpeg/
+ 	# if --libdir was not set, then it expands to '$exec_prefix/lib'
+@@ -404,11 +402,12 @@ else
+ 	if test "x$exec_prefix" = xNONE; then
+ 		exec_prefix=$acl_final_prefix
+ 	fi
+-	cmd="quicktime/ffmpeg/configure \$ff_conf_args \
++	cmd="configure \$ff_conf_args \
+ 		--prefix=\"\$acl_final_prefix\" \
+-		--libdir=\"$libdir\" --shlibdir=\"$libdir\""
++		--libdir=\"$libdir\" --shlibdir=\"$libdir\" \
++		--extra-cflags=\"-fPIC\""
+ 	eval echo $cmd
+-	eval \$srcdir_c/$cmd
++	eval ./$cmd
+ 	)
+ fi
+ echo --------------------------------------------------
+@@ -430,6 +429,13 @@ AC_SUBST(XIPH_LIBS)
+ # Just test to see if we have lame installed.
+ AC_CHECK_HEADER(lame/lame.h,[libmp3lameh=yes])
+ AC_CHECK_LIB(mp3lame,lame_init,[libmp3lame=yes],,[$XIPH_LIBS])
++#
++# Ichthyo 7/2011: liblame somehow got picked up if available
++#                 we need to link cinelerra against it
++if test "x$libmp3lame" = xyes; then
++    MP3LAME_LIBS="-lmp3lame"
++fi
++AC_SUBST(MP3LAME_LIBS)
+ # END LAME
+ 
+ ############## OpenGL
+--- cinelerra-cv-2.1.5.hiv20110722.orig/cinelerra/Makefile.am
++++ cinelerra-cv-2.1.5.hiv20110722/cinelerra/Makefile.am
+@@ -681,6 +681,7 @@ cinelerra_LDADD = \
+ 	$(top_builddir)/libmpeg3/libmpeg3hv.la \
+ 	@FFMPEG_LIBS@ \
+ 	$(XIPH_LIBS) \
++	$(MP3LAME_LIBS) \
+ 	$(A52DEC_LIBS) \
+ 	$(OPENEXR_LIBS) \
+ 	-lsndfile \
+
