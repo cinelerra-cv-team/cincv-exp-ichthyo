@@ -1,3 +1,12 @@
+cinelerra-cv (2.1.5-0+hiv20110722+prod) unstable; urgency=low
+
+  * Cinelerra 2.1.5 with bezier patch by Ichthyo
+  * use optlibx11-noxcb-6 to avoid deadlocks
+  * lowered requirement on mjpegtools (from 2.0 to 1.9) for backport
+  * custom build by Ichthyo with AMD64 optimisations for PROD use
+
+ -- Hermann Vosseler <deb@ichthyostega.de>  Sat, 23 Jul 2011 04:30:55 +0200
+
 cinelerra-cv (2.1.5-0.5) unstable; urgency=low
 
   * Remove deprecated libesd support.
@@ -222,6 +231,53 @@ cinelerra (2.1.0~svn20070827-0.1) unstable; urgency=low
   * Add a Conflicts for libguicast.
 
  -- Christian Marillat <marillat@debian.org>  Sun, 25 Nov 2007 10:11:28 +0000
+
+hvirtual (1:2.1.hiv20081227-0+prod) unstable; urgency=low
+
+  * Cinelerra 2.1 with bezier patch by Ichthyo
+  * (GIT from 2008-12-27) : Fixes by the Community since last release 
+  * use optlibx11-noxcb-6 to avoid deadlocks
+  * custom build by Ichthyo with AMD64 optimisations for PROD use
+
+ -- Ichthyostega <Ichthyostega@web.de>  Mon, 23 Feb 2009 02:03:23 +0100
+
+hvirtual (1:2.1.hiv20081227-0+debug) unstable; urgency=low
+
+  * Cinelerra 2.1 with bezier patch by Ichthyo
+  * (GIT from 2008-12-27) : Fixes by the Community since last release 
+  * ported over my bezier patch
+  * incorporate buildsystem tweaks from Akirad.
+  * use optlibx11-noxcb-6 to avoid deadlocks
+  * development build by Ichthyo
+
+ -- Ichthyostega <Ichthyostega@web.de>  Mon, 23 Feb 2009 02:03:23 +0100
+
+hvirtual (1:2.1.hiv20070504-0+prod) unstable; urgency=low
+
+  * just ported over my bezier patch onto SVN r1007
+  * git 074453d4a46a665b363f1999609e0c94dc3392ff
+  * AMD64 optimizations, production build (optimized)
+  
+ -- Ichthyostega <Ichthyostega@web.de>  Fri, 04 May 2007 08:29:23 +0200
+
+hvirtual (1:2.1.hiv20070503-0+prod) unstable; urgency=low
+
+  * git b3945d07129eacb33ee0ad1687e1dd8d0ecb0886
+  * bezier patch finished and partially reviewed
+  * changed auto smooth rule (+bugfixes)
+  * recompiled for production use (optimized build)
+  
+ -- Ichthyostega <Ichthyostega@web.de>  Fri, 04 May 2007 05:40:23 +0200
+
+hvirtual (1:2.1.0-svn20061001) unstable; urgency=low
+
+  * Cinelerra 2.1
+  * SVN of 2006-10-1 custom build by HIV from current SVN (r909)
+  * custom patch to enhance bezier automation
+  * custom splash screen
+  * AMD64 optimizations in Makefile
+
+ -- Ichthyostega <Ichthyostega@web.de>  Wed, 5 Oct 2006 01:02:23 +0200
 
 hvirtual (1:2.1.0-1svn20060912) unstable; urgency=low
 
